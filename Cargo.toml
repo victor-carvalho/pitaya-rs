@@ -1,0 +1,30 @@
+[package]
+name = "pitaya-rs"
+version = "0.1.0"
+authors = ["Leonardo Hahn <leonardo.hahn@tfgco.com>"]
+edition = "2018"
+
+[lib]
+name = "pitaya"
+path = "src/lib.rs"
+
+[[bin]]
+name = "main"
+path = "src/main.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tonic = "0.2.1"
+prost = "0.6.1"
+natsio = "0.3.2"
+etcd-client = "0.2"
+futures = "0.3"
+tokio = { version = "0.2", features = ["full"] }
+async-trait = "0.1.33"
+log = "0.4.8"
+serde_json = "1.0"
+serde = "1.0"
+
+[build-dependencies]
+prost-build = "0.6.1"
