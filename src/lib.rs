@@ -1,12 +1,12 @@
+extern crate async_trait;
 extern crate etcd_client;
+extern crate futures;
+extern crate log;
 extern crate nats;
 extern crate prost;
-extern crate tokio;
-extern crate futures;
-extern crate async_trait;
-extern crate log;
 extern crate serde;
 extern crate serde_json;
+extern crate tokio;
 
 mod discovery;
 mod rpc;
@@ -16,7 +16,7 @@ mod protos {
     include!(concat!(env!("OUT_DIR"), "/protos.rs"));
 }
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -28,6 +28,7 @@ enum Error {
     Nats(std::io::Error),
     Etcd(etcd_client::Error),
     Json(serde_json::Error),
+    TaskJoin(tokio::task::JoinError),
 }
 
 impl std::fmt::Display for Error {
@@ -39,6 +40,7 @@ impl std::fmt::Display for Error {
             Error::Nats(ref e) => write!(f, "nats: {}", e),
             Error::Etcd(ref e) => write!(f, "etcd: {}", e),
             Error::Json(ref e) => write!(f, "json: {}", e),
+            Error::TaskJoin(ref e) => write!(f, "task join: {}", e),
         }
     }
 }
@@ -52,7 +54,14 @@ impl std::error::Error for Error {
             Error::Nats(ref e) => Some(e),
             Error::Etcd(ref e) => Some(e),
             Error::Json(ref e) => Some(e),
+            Error::TaskJoin(ref e) => Some(e),
         }
+    }
+}
+
+impl From<tokio::task::JoinError> for Error {
+    fn from(e: tokio::task::JoinError) -> Self {
+        Self::TaskJoin(e)
     }
 }
 
@@ -113,7 +122,7 @@ impl From<&str> for ServerId {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Server {
     pub id: ServerId,
-    #[serde(rename = "type")] 
+    #[serde(rename = "type")]
     pub kind: ServerKind,
     pub metadata: HashMap<String, String>,
     pub hostname: String,
@@ -136,14 +145,17 @@ mod test {
         let sv = Server {
             id: ServerId::from("randomId"),
             kind: ServerKind::from("metagame"),
-            metadata: vec![
-                ("my_key1".to_owned(), "my_val1".to_owned()),
-            ].into_iter().collect(),
+            metadata: vec![("my_key1".to_owned(), "my_val1".to_owned())]
+                .into_iter()
+                .collect(),
             hostname: "my_hostname".to_owned(),
-            frontend: true
+            frontend: true,
         };
         let json = serde_json::to_string(&sv)?;
-        assert_eq!(json, r#"{"id":"randomId","type":"metagame","metadata":{"my_key1":"my_val1"},"hostname":"my_hostname","frontend":true}"#);
+        assert_eq!(
+            json,
+            r#"{"id":"randomId","type":"metagame","metadata":{"my_key1":"my_val1"},"hostname":"my_hostname","frontend":true}"#
+        );
         Ok(())
     }
 }
