@@ -1,7 +1,7 @@
 use super::{Error, Server, ServerId, ServerKind};
 use async_trait::async_trait;
 use etcd_client::GetOptions;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::sync::Arc;
@@ -36,6 +36,10 @@ struct EtcdLazy {
         tokio::task::JoinHandle<()>,
         tokio::sync::oneshot::Sender<()>,
     )>,
+    watch_task: Option<(
+        tokio::task::JoinHandle<()>,
+        tokio::sync::oneshot::Sender<()>,
+    )>,
     lease_ttl: Duration,
 
     // TODO: Shouldn't this fields be mutexes?
@@ -61,6 +65,7 @@ impl EtcdLazy {
             listeners: Vec::new(),
             keep_alive_task: None,
             lease_ttl: lease_ttl,
+            watch_task: None,
         })
     }
 
@@ -70,18 +75,25 @@ impl EtcdLazy {
     ) -> Result<(), Error> {
         self.grant_lease(app_die_sender).await?;
         self.add_server_to_etcd().await?;
-        // self.start_watch().await?;
+        self.start_watch().await?;
         Ok(())
     }
 
     pub(crate) async fn stop(&mut self) -> Result<(), Error> {
+        info!("stopping etcd service discovery");
         if let Some((handle, sender)) = self.keep_alive_task.take() {
-            info!("stopping etcd service discovery");
             let _ = sender.send(()).map_err(|_| {
                 error!("failed to send stop message");
             });
             handle.await?;
         }
+        if let Some((handle, sender)) = self.watch_task.take() {
+            let _ = sender.send(()).map_err(|_| {
+                error!("failed to send stop message");
+            });
+            handle.await?;
+        }
+        info!("revoking lease");
         self.revoke_lease().await?;
         Ok(())
     }
@@ -230,10 +242,43 @@ impl EtcdLazy {
         Ok(())
     }
 
-    async fn watch_task(watcher: etcd_client::Watcher, stream: etcd_client::WatchStream) {
-        use tokio::time::timeout;
-
-        unimplemented!()
+    async fn watch_task(
+        watcher: etcd_client::Watcher,
+        mut stream: etcd_client::WatchStream,
+        mut stop_receiver: tokio::sync::oneshot::Receiver<()>,
+    ) {
+        loop {
+            tokio::select! {
+                res = stream.message() => {
+                    match res {
+                        Ok(watch_response) => {
+                            if let Some(watch_response) = watch_response {
+                                for event in watch_response.events() {
+                                    match event.event_type() {
+                                        etcd_client::EventType::Put => {
+                                            info!("key added!");
+                                        }
+                                        etcd_client::EventType::Delete => {
+                                            info!("key removed!");
+                                        }
+                                    }
+                                }
+                            } else {
+                                // When does this branch occur?
+                                warn!("did not get watch response");
+                            }
+                        }
+                        Err(e) => {
+                            error!("failed to get watch message: {}", e);
+                        }
+                    }
+                }
+                _ = &mut stop_receiver => {
+                    info!("received stop message, exiting watch task");
+                    return;
+                }
+            }
+        }
     }
 
     async fn start_watch(&mut self) -> Result<(), Error> {
@@ -241,7 +286,10 @@ impl EtcdLazy {
         let options = etcd_client::WatchOptions::new().with_prefix();
         let (watcher, watch_stream) = self.client.watch(watch_prefix, Some(options)).await?;
 
-        let handle = tokio::spawn(Self::watch_task(watcher, watch_stream));
+        let (stop_sender, stop_receiver) = tokio::sync::oneshot::channel::<()>();
+        let handle = tokio::spawn(Self::watch_task(watcher, watch_stream, stop_receiver));
+
+        self.watch_task = Some((handle, stop_sender));
 
         Ok(())
     }
