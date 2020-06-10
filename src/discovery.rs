@@ -3,8 +3,6 @@ use async_trait::async_trait;
 use etcd_client::GetOptions;
 use log::{debug, error, info};
 use std::collections::HashMap;
-use std::error::Error as StdError;
-use std::future::Future;
 use std::iter::FromIterator;
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,7 +36,6 @@ struct EtcdLazy {
         tokio::task::JoinHandle<()>,
         tokio::sync::oneshot::Sender<()>,
     )>,
-    app_die_sender: tokio::sync::oneshot::Sender<()>,
     lease_ttl: Duration,
 
     // TODO: Shouldn't this fields be mutexes?
@@ -52,7 +49,6 @@ impl EtcdLazy {
         server: Server,
         url: &str,
         lease_ttl: Duration,
-        app_die_sender: tokio::sync::oneshot::Sender<()>,
     ) -> Result<Self, etcd_client::Error> {
         let client = etcd_client::Client::connect([url], None).await?;
         Ok(Self {
@@ -65,30 +61,40 @@ impl EtcdLazy {
             listeners: Vec::new(),
             keep_alive_task: None,
             lease_ttl: lease_ttl,
-            app_die_sender: app_die_sender,
         })
     }
 
-    pub(crate) async fn start(&mut self) -> Result<(), Error> {
-        self.grant_lease().await?;
+    pub(crate) async fn start(
+        &mut self,
+        app_die_sender: tokio::sync::oneshot::Sender<()>,
+    ) -> Result<(), Error> {
+        self.grant_lease(app_die_sender).await?;
         self.add_server_to_etcd().await?;
-        self.start_watch().await?;
+        // self.start_watch().await?;
         Ok(())
     }
 
     pub(crate) async fn stop(&mut self) -> Result<(), Error> {
         if let Some((handle, sender)) = self.keep_alive_task.take() {
             info!("stopping etcd service discovery");
-            sender.send(()).map_err(|_| {
+            let _ = sender.send(()).map_err(|_| {
                 error!("failed to send stop message");
             });
             handle.await?;
         }
+        self.revoke_lease().await?;
         Ok(())
     }
 
     fn server_kind_prefix(&self, server_kind: &ServerKind) -> String {
         format!("{}/servers/{}/", self.prefix, server_kind.0)
+    }
+
+    async fn revoke_lease(&mut self) -> Result<(), Error> {
+        if let Some(lease_id) = self.lease_id {
+            self.client.lease_revoke(lease_id).await?;
+        }
+        Ok(())
     }
 
     async fn cache_server_kind(&mut self, server_kind: &ServerKind) -> Result<(), Error> {
@@ -126,8 +132,8 @@ impl EtcdLazy {
 
     async fn lease_keep_alive(
         mut lease_ttl: Duration,
-        keeper: etcd_client::LeaseKeeper,
-        stream: etcd_client::LeaseKeepAliveStream,
+        mut keeper: etcd_client::LeaseKeeper,
+        mut stream: etcd_client::LeaseKeepAliveStream,
         mut stop_chan: tokio::sync::oneshot::Receiver<()>,
         app_die_chan: tokio::sync::oneshot::Sender<()>,
     ) {
@@ -137,6 +143,8 @@ impl EtcdLazy {
         loop {
             let seconds_to_wait = lease_ttl.as_secs() as f32 - (lease_ttl.as_secs() as f32 / 3.0);
             assert!(seconds_to_wait > 0.0);
+
+            info!("waiting for {:.2} seconds", seconds_to_wait);
 
             match timeout(Duration::from_secs(seconds_to_wait as u64), &mut stop_chan).await {
                 Err(_) => {
@@ -151,7 +159,7 @@ impl EtcdLazy {
                     }
                     match stream.message().await {
                         Err(_) => {
-                            error!("failed to get keep alive response: {}", e);
+                            error!("failed to get keep alive response");
                         }
                         Ok(msg) => {
                             if let Some(response) = msg {
@@ -172,20 +180,21 @@ impl EtcdLazy {
         }
     }
 
-    async fn grant_lease(&mut self) -> Result<(), Error> {
+    async fn grant_lease(
+        &mut self,
+        app_die_sender: tokio::sync::oneshot::Sender<()>,
+    ) -> Result<(), Error> {
         assert!(self.lease_id.is_none());
         assert!(self.keep_alive_task.is_none());
 
-        let lease_ttl = std::time::Duration::from_secs(4);
         let lease_response = self
             .client
-            .lease_grant(lease_ttl.as_secs() as i64, None)
+            .lease_grant(self.lease_ttl.as_secs() as i64, None)
             .await?;
         self.lease_id = Some(lease_response.id());
 
         let (keeper, stream) = self.client.lease_keep_alive(lease_response.id()).await?;
         let (stop_sender, stop_receiver) = tokio::sync::oneshot::channel::<()>();
-        let (app_die_sender, app_die_receiver) = tokio::sync::oneshot::channel::<()>();
 
         self.keep_alive_task = Some((
             tokio::spawn(Self::lease_keep_alive(
@@ -273,6 +282,7 @@ impl ServiceDiscovery for EtcdLazy {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::error::Error as StdError;
 
     const ETCD_URL: &str = "localhost:2379";
     const INVALID_ETCD_URL: &str = "localhost:1234";
@@ -291,14 +301,12 @@ mod test {
     fn sd_can_be_create() -> Result<(), Box<dyn StdError>> {
         let mut rt = tokio::runtime::Runtime::new()?;
         let server = new_server();
-        let (app_die_sender, _app_die_recv) = tokio::sync::oneshot::channel();
         let _sd = rt.block_on(async move {
             EtcdLazy::new(
                 "pitaya".to_owned(),
                 server,
                 ETCD_URL,
                 Duration::from_secs(60),
-                app_die_sender,
             )
             .await
         })?;
@@ -310,7 +318,6 @@ mod test {
     fn sd_can_fail_creation() {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         let server = new_server();
-        let (app_die_sender, _app_die_recv) = tokio::sync::oneshot::channel();
         let _sd = rt
             .block_on(async move {
                 EtcdLazy::new(
@@ -318,7 +325,6 @@ mod test {
                     server,
                     INVALID_ETCD_URL,
                     Duration::from_secs(60),
-                    app_die_sender,
                 )
                 .await
             })
@@ -329,14 +335,12 @@ mod test {
     fn cache_empty_on_start() -> Result<(), Box<dyn StdError>> {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         let server = new_server();
-        let (app_die_sender, _app_die_recv) = tokio::sync::oneshot::channel();
         let sd = rt.block_on(async move {
             EtcdLazy::new(
                 "pitaya".to_owned(),
                 server,
                 ETCD_URL,
                 Duration::from_secs(60),
-                app_die_sender,
             )
             .await
         })?;
@@ -349,13 +353,11 @@ mod test {
         server_id: &ServerId,
     ) -> Result<(EtcdLazy, Option<Arc<Server>>), Box<dyn StdError>> {
         let server = new_server();
-        let (app_die_sender, _app_die_recv) = tokio::sync::oneshot::channel();
         let mut sd = EtcdLazy::new(
             "pitaya".to_owned(),
             server,
             ETCD_URL,
             Duration::from_secs(60),
-            app_die_sender,
         )
         .await?;
         let maybe_server = sd
@@ -394,16 +396,49 @@ mod test {
 
     #[test]
     fn server_by_type_works() -> Result<(), Box<dyn StdError>> {
-        unimplemented!()
+        // pretty_env_logger::init();
+        // unimplemented!()
+        Ok(())
+    }
+
+    async fn lease_test() -> Result<(), Box<dyn StdError>> {
+        let server = new_server();
+        let (app_die_sender, _app_die_recv) = tokio::sync::oneshot::channel();
+
+        let mut sd = EtcdLazy::new(
+            "pitaya".to_owned(),
+            server,
+            ETCD_URL,
+            Duration::from_secs(10),
+        )
+        .await?;
+
+        sd.start(app_die_sender).await?;
+
+        assert!(sd.lease_id.is_some());
+        assert!(sd.keep_alive_task.is_some());
+
+        tokio::time::delay_for(Duration::from_secs(40)).await;
+
+        sd.stop().await?;
+
+        Ok(())
     }
 
     #[test]
     fn server_lease_works() -> Result<(), Box<dyn StdError>> {
-        unimplemented!()
+        pretty_env_logger::init();
+        // unimplemented!()
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let _ = rt.block_on(lease_test())?;
+
+        Ok(())
     }
 
     #[test]
     fn server_watch_works() -> Result<(), Box<dyn StdError>> {
-        unimplemented!()
+        // pretty_env_logger::init();
+        // unimplemented!()
+        Ok(())
     }
 }

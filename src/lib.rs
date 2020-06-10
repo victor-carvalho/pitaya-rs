@@ -3,6 +3,7 @@ extern crate etcd_client;
 extern crate futures;
 extern crate log;
 extern crate nats;
+extern crate pretty_env_logger;
 extern crate prost;
 extern crate serde;
 extern crate serde_json;
