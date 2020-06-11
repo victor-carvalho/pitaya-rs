@@ -1,10 +1,10 @@
-use super::{Error, Server, ServerId, ServerKind};
+use crate::{error::Error, Server, ServerId, ServerKind};
 use async_trait::async_trait;
 use etcd_client::GetOptions;
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::iter::FromIterator;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 mod tasks;
@@ -118,6 +118,7 @@ impl EtcdLazy {
             handle.await?;
         }
         if let Some((handle, mut watcher)) = self.watch_task.take() {
+            info!("cancelling watcher");
             watcher.cancel().await?;
             handle.await?;
         }
@@ -411,8 +412,6 @@ mod test {
 
         assert!(sd.lease_id.is_some());
         assert!(sd.keep_alive_task.is_some());
-
-        tokio::time::delay_for(Duration::from_secs(120)).await;
 
         sd.stop().await?;
 

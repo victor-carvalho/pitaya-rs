@@ -1,4 +1,5 @@
-use super::{protos, utils, Error, Server, ServerId, ServerKind};
+use super::{protos, utils, Server, ServerId, ServerKind};
+use crate::error::Error;
 use prost::Message;
 use std::time::Duration;
 
