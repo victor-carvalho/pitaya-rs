@@ -4,8 +4,10 @@ use etcd_client::GetOptions;
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::iter::FromIterator;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
+
+mod tasks;
 
 trait Listener {
     fn server_added(&mut self, server: Server);
@@ -25,6 +27,41 @@ trait ServiceDiscovery {
     fn remove_listener(&mut self, _listener: Box<dyn Listener>) {}
 }
 
+struct ServersCache {
+    servers_by_id: HashMap<ServerId, Arc<Server>>,
+    servers_by_kind: HashMap<ServerKind, HashMap<ServerId, Arc<Server>>>,
+}
+
+impl ServersCache {
+    fn new() -> Self {
+        Self {
+            servers_by_id: HashMap::new(),
+            servers_by_kind: HashMap::new(),
+        }
+    }
+
+    fn by_id(&self, id: &ServerId) -> Option<Arc<Server>> {
+        self.servers_by_id.get(id).map(|s| s.clone())
+    }
+
+    fn insert(&mut self, server: Arc<Server>) {
+        self.servers_by_id.insert(server.id.clone(), server.clone());
+        self.servers_by_kind
+            .entry(server.kind.clone())
+            .and_modify(|servers| {
+                servers.insert(server.id.clone(), server.clone());
+            })
+            .or_insert(HashMap::from_iter(
+                [(server.id.clone(), server)].iter().cloned(),
+            ));
+    }
+
+    fn remove(&mut self, server_kind: &ServerKind, server_id: &ServerId) {
+        self.servers_by_id.remove(server_id);
+        self.servers_by_kind.remove(server_kind);
+    }
+}
+
 // This service discovery is a lazy implementation.
 struct EtcdLazy {
     client: etcd_client::Client,
@@ -36,15 +73,9 @@ struct EtcdLazy {
         tokio::task::JoinHandle<()>,
         tokio::sync::oneshot::Sender<()>,
     )>,
-    watch_task: Option<(
-        tokio::task::JoinHandle<()>,
-        tokio::sync::oneshot::Sender<()>,
-    )>,
+    watch_task: Option<(tokio::task::JoinHandle<()>, etcd_client::Watcher)>,
     lease_ttl: Duration,
-
-    // TODO: Shouldn't this fields be mutexes?
-    servers_by_id: HashMap<ServerId, Arc<Server>>,
-    servers_by_type: HashMap<ServerKind, HashMap<ServerId, Arc<Server>>>,
+    servers_cache: Arc<Mutex<ServersCache>>,
 }
 
 impl EtcdLazy {
@@ -59,8 +90,7 @@ impl EtcdLazy {
             client: client,
             prefix: prefix,
             this_server: server,
-            servers_by_id: HashMap::new(),
-            servers_by_type: HashMap::new(),
+            servers_cache: Arc::new(Mutex::new(ServersCache::new())),
             lease_id: None,
             listeners: Vec::new(),
             keep_alive_task: None,
@@ -87,10 +117,8 @@ impl EtcdLazy {
             });
             handle.await?;
         }
-        if let Some((handle, sender)) = self.watch_task.take() {
-            let _ = sender.send(()).map_err(|_| {
-                error!("failed to send stop message");
-            });
+        if let Some((handle, mut watcher)) = self.watch_task.take() {
+            watcher.cancel().await?;
             handle.await?;
         }
         info!("revoking lease");
@@ -127,69 +155,10 @@ impl EtcdLazy {
             let new_server: Arc<Server> = Arc::new(serde_json::from_str(server_str)?);
             let new_server_id = new_server.id.clone();
 
-            self.servers_by_id
-                .insert(new_server.id.clone(), new_server.clone());
-
-            self.servers_by_type
-                .entry(new_server.kind.clone())
-                .and_modify(|servers| {
-                    servers.insert(new_server_id.clone(), new_server.clone());
-                })
-                .or_insert(HashMap::from_iter(
-                    [(new_server_id, new_server)].iter().cloned(),
-                ));
+            let mut servers_cache = self.servers_cache.lock().unwrap();
+            servers_cache.insert(new_server);
         }
         Ok(())
-    }
-
-    async fn lease_keep_alive(
-        mut lease_ttl: Duration,
-        mut keeper: etcd_client::LeaseKeeper,
-        mut stream: etcd_client::LeaseKeepAliveStream,
-        mut stop_chan: tokio::sync::oneshot::Receiver<()>,
-        app_die_chan: tokio::sync::oneshot::Sender<()>,
-    ) {
-        use tokio::time::timeout;
-
-        info!("keep alive task started");
-        loop {
-            let seconds_to_wait = lease_ttl.as_secs() as f32 - (lease_ttl.as_secs() as f32 / 3.0);
-            assert!(seconds_to_wait > 0.0);
-
-            info!("waiting for {:.2} seconds", seconds_to_wait);
-
-            match timeout(Duration::from_secs(seconds_to_wait as u64), &mut stop_chan).await {
-                Err(_) => {
-                    // TODO(lhahn): currently, the ttl will fail as soon as it loses connection to etcd.
-                    // Figure out if a more robust retrying scheme is necessary here.
-                    if let Err(e) = keeper.keep_alive().await {
-                        error!("failed keep alive request: {}", e);
-                        if let Err(_) = app_die_chan.send(()) {
-                            error!("failed to send die message");
-                        }
-                        return;
-                    }
-                    match stream.message().await {
-                        Err(_) => {
-                            error!("failed to get keep alive response");
-                        }
-                        Ok(msg) => {
-                            if let Some(response) = msg {
-                                debug!("lease renewed with new ttl of {} seconds", response.ttl());
-                                assert!(response.ttl() > 0);
-                                lease_ttl = Duration::from_secs(response.ttl() as u64);
-                            } else {
-                                // TODO(lhahn): what to do here?
-                            }
-                        }
-                    }
-                }
-                Ok(_) => {
-                    info!("received stop message, exiting lease keep alive task");
-                    return;
-                }
-            }
-        }
     }
 
     async fn grant_lease(
@@ -209,7 +178,7 @@ impl EtcdLazy {
         let (stop_sender, stop_receiver) = tokio::sync::oneshot::channel::<()>();
 
         self.keep_alive_task = Some((
-            tokio::spawn(Self::lease_keep_alive(
+            tokio::spawn(tasks::lease_keep_alive(
                 self.lease_ttl.clone(),
                 keeper,
                 stream,
@@ -242,54 +211,17 @@ impl EtcdLazy {
         Ok(())
     }
 
-    async fn watch_task(
-        watcher: etcd_client::Watcher,
-        mut stream: etcd_client::WatchStream,
-        mut stop_receiver: tokio::sync::oneshot::Receiver<()>,
-    ) {
-        loop {
-            tokio::select! {
-                res = stream.message() => {
-                    match res {
-                        Ok(watch_response) => {
-                            if let Some(watch_response) = watch_response {
-                                for event in watch_response.events() {
-                                    match event.event_type() {
-                                        etcd_client::EventType::Put => {
-                                            info!("key added!");
-                                        }
-                                        etcd_client::EventType::Delete => {
-                                            info!("key removed!");
-                                        }
-                                    }
-                                }
-                            } else {
-                                // When does this branch occur?
-                                warn!("did not get watch response");
-                            }
-                        }
-                        Err(e) => {
-                            error!("failed to get watch message: {}", e);
-                        }
-                    }
-                }
-                _ = &mut stop_receiver => {
-                    info!("received stop message, exiting watch task");
-                    return;
-                }
-            }
-        }
-    }
-
     async fn start_watch(&mut self) -> Result<(), Error> {
         let watch_prefix = format!("{}/servers/", self.prefix);
         let options = etcd_client::WatchOptions::new().with_prefix();
         let (watcher, watch_stream) = self.client.watch(watch_prefix, Some(options)).await?;
 
-        let (stop_sender, stop_receiver) = tokio::sync::oneshot::channel::<()>();
-        let handle = tokio::spawn(Self::watch_task(watcher, watch_stream, stop_receiver));
-
-        self.watch_task = Some((handle, stop_sender));
+        let handle = tokio::spawn(tasks::watch_task(
+            self.servers_cache.clone(),
+            self.prefix.clone(),
+            watch_stream,
+        ));
+        self.watch_task = Some((handle, watcher));
 
         Ok(())
     }
@@ -302,7 +234,13 @@ impl ServiceDiscovery for EtcdLazy {
         server_id: &ServerId,
         server_kind: &ServerKind,
     ) -> Result<Option<Arc<Server>>, Error> {
-        if let Some(server) = self.servers_by_id.get(server_id).map(|sv| sv.clone()) {
+        if let Some(server) = self
+            .servers_cache
+            .lock()
+            .unwrap()
+            .by_id(server_id)
+            .map(|sv| sv.clone())
+        {
             return Ok(Some(server));
         }
 
@@ -319,7 +257,12 @@ impl ServiceDiscovery for EtcdLazy {
         info!("etcd returned {} keys", resp.kvs().len());
         self.cache_server_kind(server_kind).await?;
 
-        Ok(self.servers_by_id.get(server_id).map(|sv| sv.clone()))
+        Ok(self
+            .servers_cache
+            .lock()
+            .unwrap()
+            .by_id(server_id)
+            .map(|sv| sv.clone()))
     }
 
     async fn servers_by_type(&mut self, _server: &ServerKind) -> Result<Vec<Arc<Server>>, Error> {
@@ -392,8 +335,8 @@ mod test {
             )
             .await
         })?;
-        assert_eq!(sd.servers_by_id.len(), 0);
-        assert_eq!(sd.servers_by_type.len(), 0);
+        assert_eq!(sd.servers_cache.lock().unwrap().servers_by_id.len(), 0);
+        assert_eq!(sd.servers_cache.lock().unwrap().servers_by_kind.len(), 0);
         Ok(())
     }
 
@@ -419,20 +362,23 @@ mod test {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         let (sd, server) = rt.block_on(server_by_id_main(&ServerId::from("random-id")))?;
         assert!(server.is_none());
-        assert_eq!(sd.servers_by_id.len(), 1);
+        assert_eq!(sd.servers_cache.lock().unwrap().servers_by_id.len(), 1);
 
         let mut server_id: Option<ServerId> = None;
-        for (id, _) in sd.servers_by_id.iter() {
+        for (id, _) in sd.servers_cache.lock().unwrap().servers_by_id.iter() {
             server_id = Some(id.clone());
         }
 
         let (sd, server) = rt.block_on(server_by_id_main(server_id.as_ref().unwrap()))?;
 
         assert!(server.is_some());
-        assert_eq!(sd.servers_by_id.len(), 1);
-        assert_eq!(sd.servers_by_type.len(), 1);
+        assert_eq!(sd.servers_cache.lock().unwrap().servers_by_id.len(), 1);
+        assert_eq!(sd.servers_cache.lock().unwrap().servers_by_kind.len(), 1);
         assert_eq!(
-            sd.servers_by_type
+            sd.servers_cache
+                .lock()
+                .unwrap()
+                .servers_by_kind
                 .get(&ServerKind::from("room"))
                 .unwrap()
                 .len(),
@@ -466,7 +412,7 @@ mod test {
         assert!(sd.lease_id.is_some());
         assert!(sd.keep_alive_task.is_some());
 
-        tokio::time::delay_for(Duration::from_secs(40)).await;
+        tokio::time::delay_for(Duration::from_secs(120)).await;
 
         sd.stop().await?;
 
