@@ -55,7 +55,7 @@ pub(super) async fn lease_keep_alive(
 }
 
 pub(super) async fn watch_task(
-    mut servers_cache: Arc<Mutex<ServersCache>>,
+    servers_cache: Arc<Mutex<ServersCache>>,
     prefix: String,
     mut stream: etcd_client::WatchStream,
 ) {
@@ -64,6 +64,11 @@ pub(super) async fn watch_task(
 
         match stream.message().await {
             Ok(Some(watch_response)) => {
+                if watch_response.canceled() {
+                    info!("watch was cancelled, exiting task");
+                    return;
+                }
+
                 for event in watch_response.events() {
                     let kv = match event.kv() {
                         Some(kv) => kv,
