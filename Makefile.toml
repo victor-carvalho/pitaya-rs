@@ -33,15 +33,15 @@ go build main.go
 
 [tasks.run-example-server]
 private = true
-dependencies = [ 
-    "ensure-example-server-bin", 
-    "stop-example-server" 
+dependencies = [
+    "ensure-example-server-bin",
+    "stop-example-server"
 ]
 script_runner = "@shell"
 script = [
 '''
 cd example-pitaya-server
-./main --port 3251 --type room --frontend=false > output.log 2>&1 & 
+./main --port 3251 --type room --frontend=false > output.log 2>&1 &
 echo $! > example-pitaya-server.pid
 '''
 ]
@@ -53,7 +53,7 @@ script = [
 '''
 cd example-pitaya-server
 if [[ -f example-pitaya-server.pid ]]; then
-    kill -TERM $(cat example-pitaya-server.pid)
+    kill -TERM $(cat example-pitaya-server.pid) || true
     rm example-pitaya-server.pid
 fi
 rm -f output.log
