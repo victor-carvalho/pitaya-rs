@@ -1,7 +1,7 @@
 use super::ServersCache;
 use crate::{Server, ServerId, ServerKind};
 use log::{debug, error, info, warn};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 pub(super) async fn lease_keep_alive(
@@ -55,7 +55,7 @@ pub(super) async fn lease_keep_alive(
 }
 
 pub(super) async fn watch_task(
-    servers_cache: Arc<Mutex<ServersCache>>,
+    servers_cache: Arc<RwLock<ServersCache>>,
     prefix: String,
     mut stream: etcd_client::WatchStream,
 ) {
@@ -106,7 +106,7 @@ pub(super) async fn watch_task(
                             };
 
                             info!("server added: {:?}", server);
-                            servers_cache.lock().unwrap().insert(server);
+                            servers_cache.write().unwrap().insert(server);
                         }
                         etcd_client::EventType::Delete => {
                             let (server_kind, server_id) =
@@ -120,7 +120,7 @@ pub(super) async fn watch_task(
 
                             info!("server removed: kind={} id={}", server_kind.0, server_id.0);
                             servers_cache
-                                .lock()
+                                .write()
                                 .unwrap()
                                 .remove(&server_kind, &server_id);
                         }

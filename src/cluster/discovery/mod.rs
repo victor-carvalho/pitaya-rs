@@ -4,14 +4,16 @@ use etcd_client::GetOptions;
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::iter::FromIterator;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use tokio::sync::broadcast;
 
 mod tasks;
 
-trait Listener {
-    fn server_added(&mut self, server: Server);
-    fn server_removed(&mut self, server: Server);
+#[derive(Debug, Clone)]
+enum Notification {
+    ServerAdded(Arc<Server>),
+    ServerRemoved(ServerId),
 }
 
 #[async_trait]
@@ -22,21 +24,24 @@ trait ServiceDiscovery {
         kind: &ServerKind,
     ) -> Result<Option<Arc<Server>>, Error>;
     async fn servers_by_kind(&mut self, sv_type: &ServerKind) -> Result<Vec<Arc<Server>>, Error>;
-
-    fn add_listener(&mut self, _listener: Box<dyn Listener>) {}
-    fn remove_listener(&mut self, _listener: Box<dyn Listener>) {}
+    fn get_notification_channel(&mut self) -> broadcast::Receiver<Notification>;
 }
 
 struct ServersCache {
     servers_by_id: HashMap<ServerId, Arc<Server>>,
     servers_by_kind: HashMap<ServerKind, HashMap<ServerId, Arc<Server>>>,
+    notification_chan: (
+        broadcast::Sender<Notification>,
+        broadcast::Receiver<Notification>,
+    ),
 }
 
 impl ServersCache {
-    fn new() -> Self {
+    fn new(max_chan_size: usize) -> Self {
         Self {
             servers_by_id: HashMap::new(),
             servers_by_kind: HashMap::new(),
+            notification_chan: broadcast::channel(max_chan_size),
         }
     }
 
@@ -45,6 +50,7 @@ impl ServersCache {
     }
 
     fn insert(&mut self, server: Arc<Server>) {
+        self.notify(Notification::ServerAdded(server.clone()));
         self.servers_by_id.insert(server.id.clone(), server.clone());
         self.servers_by_kind
             .entry(server.kind.clone())
@@ -57,8 +63,22 @@ impl ServersCache {
     }
 
     fn remove(&mut self, server_kind: &ServerKind, server_id: &ServerId) {
+        self.notify(Notification::ServerRemoved(server_id.clone()));
         self.servers_by_id.remove(server_id);
         self.servers_by_kind.remove(server_kind);
+    }
+
+    fn subscribe(&self) -> broadcast::Receiver<Notification> {
+        self.notification_chan.0.subscribe()
+    }
+
+    fn notify(&self, notification: Notification) {
+        let notify_count = self
+            .notification_chan
+            .0
+            .send(notification.clone())
+            .unwrap_or(0);
+        debug!("notified {} receivers of {:?}", notify_count, notification);
     }
 }
 
@@ -68,14 +88,13 @@ struct EtcdLazy {
     prefix: String,
     this_server: Server,
     lease_id: Option<i64>,
-    listeners: Vec<Box<dyn Listener + Send>>,
     keep_alive_task: Option<(
         tokio::task::JoinHandle<()>,
         tokio::sync::oneshot::Sender<()>,
     )>,
     watch_task: Option<(tokio::task::JoinHandle<()>, etcd_client::Watcher)>,
     lease_ttl: Duration,
-    servers_cache: Arc<Mutex<ServersCache>>,
+    servers_cache: Arc<RwLock<ServersCache>>,
 }
 
 impl EtcdLazy {
@@ -86,13 +105,14 @@ impl EtcdLazy {
         lease_ttl: Duration,
     ) -> Result<Self, etcd_client::Error> {
         let client = etcd_client::Client::connect([url], None).await?;
+        // TODO(lhahn): remove hardcoded max channel size.
+        let max_chan_size = 80;
         Ok(Self {
             client: client,
             prefix: prefix,
             this_server: server,
-            servers_cache: Arc::new(Mutex::new(ServersCache::new())),
+            servers_cache: Arc::new(RwLock::new(ServersCache::new(max_chan_size))),
             lease_id: None,
-            listeners: Vec::new(),
             keep_alive_task: None,
             lease_ttl: lease_ttl,
             watch_task: None,
@@ -154,9 +174,7 @@ impl EtcdLazy {
             let server_str = kv.value_str()?;
             println!("server string: {}", server_str);
             let new_server: Arc<Server> = Arc::new(serde_json::from_str(server_str)?);
-            let new_server_id = new_server.id.clone();
-
-            let mut servers_cache = self.servers_cache.lock().unwrap();
+            let mut servers_cache = self.servers_cache.write().unwrap();
             servers_cache.insert(new_server);
         }
         Ok(())
@@ -232,7 +250,7 @@ impl EtcdLazy {
         // TODO(lhahn): consider not converting between a HashMap and a vector here
         // and use a vector for storage instead.
         self.servers_cache
-            .lock()
+            .read()
             .unwrap()
             .servers_by_kind
             .get(server_kind)
@@ -243,7 +261,7 @@ impl EtcdLazy {
     // This function only returns the server without trying to cache servers.
     fn only_server_by_id(&mut self, server_id: &ServerId) -> Option<Arc<Server>> {
         self.servers_cache
-            .lock()
+            .read()
             .unwrap()
             .servers_by_id
             .get(server_id)
@@ -283,6 +301,10 @@ impl ServiceDiscovery for EtcdLazy {
             self.cache_server_kind(server_kind).await?;
         }
         Ok(self.only_servers_by_kind(server_kind))
+    }
+
+    fn get_notification_channel(&mut self) -> broadcast::Receiver<Notification> {
+        self.servers_cache.read().unwrap().subscribe()
     }
 }
 
@@ -351,8 +373,8 @@ mod test {
             )
             .await
         })?;
-        assert_eq!(sd.servers_cache.lock().unwrap().servers_by_id.len(), 0);
-        assert_eq!(sd.servers_cache.lock().unwrap().servers_by_kind.len(), 0);
+        assert_eq!(sd.servers_cache.read().unwrap().servers_by_id.len(), 0);
+        assert_eq!(sd.servers_cache.read().unwrap().servers_by_kind.len(), 0);
         Ok(())
     }
 
@@ -378,21 +400,21 @@ mod test {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         let (sd, server) = rt.block_on(server_by_id_main(&ServerId::from("random-id")))?;
         assert!(server.is_none());
-        assert_eq!(sd.servers_cache.lock().unwrap().servers_by_id.len(), 1);
+        assert_eq!(sd.servers_cache.read().unwrap().servers_by_id.len(), 1);
 
         let mut server_id: Option<ServerId> = None;
-        for (id, _) in sd.servers_cache.lock().unwrap().servers_by_id.iter() {
+        for (id, _) in sd.servers_cache.read().unwrap().servers_by_id.iter() {
             server_id = Some(id.clone());
         }
 
         let (sd, server) = rt.block_on(server_by_id_main(server_id.as_ref().unwrap()))?;
 
         assert!(server.is_some());
-        assert_eq!(sd.servers_cache.lock().unwrap().servers_by_id.len(), 1);
-        assert_eq!(sd.servers_cache.lock().unwrap().servers_by_kind.len(), 1);
+        assert_eq!(sd.servers_cache.read().unwrap().servers_by_id.len(), 1);
+        assert_eq!(sd.servers_cache.read().unwrap().servers_by_kind.len(), 1);
         assert_eq!(
             sd.servers_cache
-                .lock()
+                .read()
                 .unwrap()
                 .servers_by_kind
                 .get(&ServerKind::from("room"))
@@ -406,7 +428,6 @@ mod test {
 
     #[test]
     fn server_by_kind_works() -> Result<(), Box<dyn StdError>> {
-        // pretty_env_logger::init();
         async fn test(server_kind: &ServerKind) -> Result<(EtcdLazy, Vec<Arc<Server>>), Error> {
             let server = new_server();
             let mut sd = EtcdLazy::new(
