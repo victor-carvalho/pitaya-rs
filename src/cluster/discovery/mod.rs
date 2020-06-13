@@ -21,7 +21,7 @@ trait ServiceDiscovery {
         id: &ServerId,
         kind: &ServerKind,
     ) -> Result<Option<Arc<Server>>, Error>;
-    async fn servers_by_type(&mut self, sv_type: &ServerKind) -> Result<Vec<Arc<Server>>, Error>;
+    async fn servers_by_kind(&mut self, sv_type: &ServerKind) -> Result<Vec<Arc<Server>>, Error>;
 
     fn add_listener(&mut self, _listener: Box<dyn Listener>) {}
     fn remove_listener(&mut self, _listener: Box<dyn Listener>) {}
@@ -226,6 +226,29 @@ impl EtcdLazy {
 
         Ok(())
     }
+
+    // This function only returns the servers without trying to cache servers.
+    fn only_servers_by_kind(&mut self, server_kind: &ServerKind) -> Vec<Arc<Server>> {
+        // TODO(lhahn): consider not converting between a HashMap and a vector here
+        // and use a vector for storage instead.
+        self.servers_cache
+            .lock()
+            .unwrap()
+            .servers_by_kind
+            .get(server_kind)
+            .map(|servers_hash| servers_hash.values().map(|v| v.clone()).collect())
+            .unwrap_or(Vec::new())
+    }
+
+    // This function only returns the server without trying to cache servers.
+    fn only_server_by_id(&mut self, server_id: &ServerId) -> Option<Arc<Server>> {
+        self.servers_cache
+            .lock()
+            .unwrap()
+            .servers_by_id
+            .get(server_id)
+            .map(|sv| sv.clone())
+    }
 }
 
 #[async_trait]
@@ -235,20 +258,9 @@ impl ServiceDiscovery for EtcdLazy {
         server_id: &ServerId,
         server_kind: &ServerKind,
     ) -> Result<Option<Arc<Server>>, Error> {
-        if let Some(server) = self
-            .servers_cache
-            .lock()
-            .unwrap()
-            .by_id(server_id)
-            .map(|sv| sv.clone())
-        {
+        if let Some(server) = self.only_server_by_id(server_id) {
             return Ok(Some(server));
         }
-
-        info!(
-            "server id not found in cache, filling cache for kind {}",
-            server_kind.0
-        );
         let resp = {
             let key_prefix = self.server_kind_prefix(server_kind);
             self.client
@@ -258,16 +270,19 @@ impl ServiceDiscovery for EtcdLazy {
         info!("etcd returned {} keys", resp.kvs().len());
         self.cache_server_kind(server_kind).await?;
 
-        Ok(self
-            .servers_cache
-            .lock()
-            .unwrap()
-            .by_id(server_id)
-            .map(|sv| sv.clone()))
+        Ok(self.only_server_by_id(server_id))
     }
 
-    async fn servers_by_type(&mut self, _server: &ServerKind) -> Result<Vec<Arc<Server>>, Error> {
-        unimplemented!()
+    async fn servers_by_kind(
+        &mut self,
+        server_kind: &ServerKind,
+    ) -> Result<Vec<Arc<Server>>, Error> {
+        let servers = self.only_servers_by_kind(server_kind);
+        if servers.len() == 0 {
+            // No servers were found, we'll try to fetch servers information from etcd.
+            self.cache_server_kind(server_kind).await?;
+        }
+        Ok(self.only_servers_by_kind(server_kind))
     }
 }
 
@@ -390,9 +405,28 @@ mod test {
     }
 
     #[test]
-    fn server_by_type_works() -> Result<(), Box<dyn StdError>> {
+    fn server_by_kind_works() -> Result<(), Box<dyn StdError>> {
         // pretty_env_logger::init();
-        // unimplemented!()
+        async fn test(server_kind: &ServerKind) -> Result<(EtcdLazy, Vec<Arc<Server>>), Error> {
+            let server = new_server();
+            let mut sd = EtcdLazy::new(
+                "pitaya".to_owned(),
+                server,
+                ETCD_URL,
+                Duration::from_secs(60),
+            )
+            .await?;
+            let maybe_servers = sd.servers_by_kind(server_kind).await?;
+            Ok((sd, maybe_servers))
+        }
+
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let (_, servers) = rt.block_on(test(&ServerKind::from("room")))?;
+        assert_eq!(servers.len(), 1);
+
+        let (_, servers) = rt.block_on(test(&ServerKind::from("room2")))?;
+        assert_eq!(servers.len(), 0);
+
         Ok(())
     }
 
