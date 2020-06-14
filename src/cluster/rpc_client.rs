@@ -1,13 +1,7 @@
 use crate::{error::Error, protos, utils, Server};
-use async_trait::async_trait;
 use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
-
-#[async_trait]
-trait RpcServer {
-    async fn recv(&mut self) -> Result<protos::Response, Error>;
-}
 
 trait RpcClient {
     fn call(&self, target: Arc<Server>, req: protos::Request) -> Result<protos::Response, Error>;
@@ -220,7 +214,7 @@ mod tests {
             "content": "how are you?"
         }"#;
 
-        let response: protos::Response = client.call(
+        let response = client.call(
             servers_by_kind[0].clone(),
             protos::Request {
                 r#type: protos::RpcType::User as i32,
