@@ -24,7 +24,7 @@ trait ServiceDiscovery {
         kind: &ServerKind,
     ) -> Result<Option<Arc<Server>>, Error>;
     async fn servers_by_kind(&mut self, sv_type: &ServerKind) -> Result<Vec<Arc<Server>>, Error>;
-    fn get_notification_channel(&mut self) -> broadcast::Receiver<Notification>;
+    fn subscribe(&mut self) -> broadcast::Receiver<Notification>;
 }
 
 struct ServersCache {
@@ -50,8 +50,16 @@ impl ServersCache {
     }
 
     fn insert(&mut self, server: Arc<Server>) {
-        self.notify(Notification::ServerAdded(server.clone()));
-        self.servers_by_id.insert(server.id.clone(), server.clone());
+        self.servers_by_id
+            .insert(server.id.clone(), server.clone())
+            .map(|old_val| {
+                warn!("[cache] CACHE WAS STALE: updated old server: {:?}", old_val);
+            })
+            .or_else(|| {
+                debug!("[cache] server added: {:?}", server);
+                self.notify(Notification::ServerAdded(server.clone()));
+                None
+            });
         self.servers_by_kind
             .entry(server.kind.clone())
             .and_modify(|servers| {
@@ -63,12 +71,15 @@ impl ServersCache {
     }
 
     fn remove(&mut self, server_kind: &ServerKind, server_id: &ServerId) {
-        self.notify(Notification::ServerRemoved(server_id.clone()));
-        self.servers_by_id.remove(server_id);
+        self.servers_by_id.remove(server_id).map(|_| {
+            debug!("[cache] server removed: {}", server_id.0);
+            self.notify(Notification::ServerRemoved(server_id.clone()));
+        });
         self.servers_by_kind.remove(server_kind);
     }
 
     fn subscribe(&self) -> broadcast::Receiver<Notification> {
+        debug!("adding one more notification subscriber");
         self.notification_chan.0.subscribe()
     }
 
@@ -159,7 +170,7 @@ impl EtcdLazy {
     }
 
     async fn cache_server_kind(&mut self, server_kind: &ServerKind) -> Result<(), Error> {
-        info!(
+        debug!(
             "server id not found in cache, filling cache for kind {}",
             server_kind.0
         );
@@ -169,13 +180,11 @@ impl EtcdLazy {
                 .get(key_prefix, Some(GetOptions::new().with_prefix()))
                 .await?
         };
-        info!("etcd returned {} keys", resp.kvs().len());
+        debug!("etcd returned {} keys", resp.kvs().len());
         for kv in resp.kvs() {
             let server_str = kv.value_str()?;
-            println!("server string: {}", server_str);
             let new_server: Arc<Server> = Arc::new(serde_json::from_str(server_str)?);
-            let mut servers_cache = self.servers_cache.write().unwrap();
-            servers_cache.insert(new_server);
+            self.servers_cache.write().unwrap().insert(new_server);
         }
         Ok(())
     }
@@ -227,6 +236,7 @@ impl EtcdLazy {
         } else {
             unreachable!();
         }
+        info!("added server to etcd");
         Ok(())
     }
 
@@ -235,6 +245,7 @@ impl EtcdLazy {
         let options = etcd_client::WatchOptions::new().with_prefix();
         let (watcher, watch_stream) = self.client.watch(watch_prefix, Some(options)).await?;
 
+        info!("starting etcd watch");
         let handle = tokio::spawn(tasks::watch_task(
             self.servers_cache.clone(),
             self.prefix.clone(),
@@ -303,7 +314,7 @@ impl ServiceDiscovery for EtcdLazy {
         Ok(self.only_servers_by_kind(server_kind))
     }
 
-    fn get_notification_channel(&mut self) -> broadcast::Receiver<Notification> {
+    fn subscribe(&mut self) -> broadcast::Receiver<Notification> {
         self.servers_cache.read().unwrap().subscribe()
     }
 }
@@ -451,32 +462,27 @@ mod test {
         Ok(())
     }
 
-    async fn lease_test() -> Result<(), Box<dyn StdError>> {
-        let server = new_server();
-        let (app_die_sender, _app_die_recv) = tokio::sync::oneshot::channel();
-
-        let mut sd = EtcdLazy::new(
-            "pitaya".to_owned(),
-            server,
-            ETCD_URL,
-            Duration::from_secs(10),
-        )
-        .await?;
-
-        sd.start(app_die_sender).await?;
-
-        assert!(sd.lease_id.is_some());
-        assert!(sd.keep_alive_task.is_some());
-
-        sd.stop().await?;
-
-        Ok(())
-    }
-
     #[test]
     fn server_lease_works() -> Result<(), Box<dyn StdError>> {
-        pretty_env_logger::init();
-        // unimplemented!()
+        async fn lease_test() -> Result<(), Box<dyn StdError>> {
+            let server = new_server();
+            let (app_die_sender, _app_die_recv) = tokio::sync::oneshot::channel();
+
+            let mut sd = EtcdLazy::new(
+                "pitaya".to_owned(),
+                server,
+                ETCD_URL,
+                Duration::from_secs(10),
+            )
+            .await?;
+
+            sd.start(app_die_sender).await?;
+            assert!(sd.lease_id.is_some());
+            assert!(sd.keep_alive_task.is_some());
+            sd.stop().await?;
+            Ok(())
+        }
+
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         let _ = rt.block_on(lease_test())?;
 
@@ -485,8 +491,68 @@ mod test {
 
     #[test]
     fn server_watch_works() -> Result<(), Box<dyn StdError>> {
-        // pretty_env_logger::init();
-        // unimplemented!()
+        async fn test() -> Result<(), Box<dyn StdError>> {
+            let server = new_server();
+            let mut sd = EtcdLazy::new(
+                "pitaya".to_owned(),
+                server,
+                ETCD_URL,
+                Duration::from_secs(20),
+            )
+            .await?;
+
+            let mut subscribe_chan = sd.subscribe();
+
+            let (app_die_sender, _app_die_recv) = tokio::sync::oneshot::channel();
+            sd.start(app_die_sender).await?;
+
+            let servers_added = Arc::new(RwLock::new(Vec::new()));
+            let servers_removed = Arc::new(RwLock::new(Vec::new()));
+
+            let task_servers_added = servers_added.clone();
+            let task_servers_removed = servers_removed.clone();
+            tokio::spawn(async move {
+                loop {
+                    match subscribe_chan.recv().await {
+                        Ok(Notification::ServerAdded(sv)) => {
+                            task_servers_added.write().unwrap().push(sv);
+                        }
+                        Ok(Notification::ServerRemoved(sv)) => {
+                            task_servers_removed.write().unwrap().push(sv);
+                        }
+                        Err(_) => {
+                            return;
+                        }
+                    }
+                }
+            });
+
+            tokio::time::delay_for(Duration::from_millis(100)).await;
+
+            assert_eq!(servers_added.read().unwrap().len(), 0);
+            assert_eq!(servers_removed.read().unwrap().len(), 0);
+
+            let servers = sd
+                .servers_by_kind(&ServerKind::from("unknown-kind"))
+                .await?;
+
+            assert!(servers.is_empty());
+            assert_eq!(servers_added.read().unwrap().len(), 0);
+            assert_eq!(servers_removed.read().unwrap().len(), 0);
+
+            let servers = sd.servers_by_kind(&ServerKind::from("room")).await?;
+
+            assert_eq!(servers.len(), 1);
+            assert_eq!(servers_added.read().unwrap().len(), 1);
+            assert_eq!(servers_removed.read().unwrap().len(), 0);
+
+            sd.stop().await?;
+
+            Ok(())
+        }
+
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let _ = rt.block_on(test())?;
         Ok(())
     }
 }

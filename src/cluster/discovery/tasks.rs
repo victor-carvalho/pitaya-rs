@@ -18,7 +18,7 @@ pub(super) async fn lease_keep_alive(
         let seconds_to_wait = lease_ttl.as_secs() as f32 - (lease_ttl.as_secs() as f32 / 3.0);
         assert!(seconds_to_wait > 0.0);
 
-        info!("waiting for {:.2} seconds", seconds_to_wait);
+        debug!("waiting for {:.2} seconds", seconds_to_wait);
 
         match timeout(Duration::from_secs(seconds_to_wait as u64), &mut stop_chan).await {
             Err(_) => {
@@ -105,7 +105,6 @@ pub(super) async fn watch_task(
                                 }
                             };
 
-                            info!("server added: {:?}", server);
                             servers_cache.write().unwrap().insert(server);
                         }
                         etcd_client::EventType::Delete => {
@@ -118,7 +117,6 @@ pub(super) async fn watch_task(
                                     }
                                 };
 
-                            info!("server removed: kind={} id={}", server_kind.0, server_id.0);
                             servers_cache
                                 .write()
                                 .unwrap()
