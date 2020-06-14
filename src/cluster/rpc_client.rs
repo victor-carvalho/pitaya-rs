@@ -1,10 +1,20 @@
-use super::{protos, utils, Server, ServerId, ServerKind};
-use crate::error::Error;
+use crate::{
+    cluster::discovery::{EtcdLazy, ServiceDiscovery},
+    error::Error,
+    protos, utils, Server, ServerId, ServerKind,
+};
+use async_trait::async_trait;
 use prost::Message;
+use std::sync::Arc;
 use std::time::Duration;
 
-trait Client {
-    fn call(&self, target: &Server, req: protos::Request) -> Result<protos::Response, Error>;
+#[async_trait]
+trait RpcServer {
+    async fn recv(&mut self) -> Result<protos::Response, Error>;
+}
+
+trait RpcClient {
+    fn call(&self, target: Arc<Server>, req: protos::Request) -> Result<protos::Response, Error>;
 }
 
 struct NatsClientBuilder {
@@ -84,13 +94,13 @@ impl NatsClient {
     }
 }
 
-impl Client for NatsClient {
-    fn call(&self, target: &Server, req: protos::Request) -> Result<protos::Response, Error> {
+impl RpcClient for NatsClient {
+    fn call(&self, target: Arc<Server>, req: protos::Request) -> Result<protos::Response, Error> {
         let connection = self
             .connection
             .as_ref()
             .ok_or(Error::NatsConnectionNotOpen)?;
-        let topic = utils::topic_for_server(target);
+        let topic = utils::topic_for_server(&target);
         let buffer = {
             let mut b = Vec::with_capacity(req.encoded_len());
             req.encode(&mut b).map(|_| b)
@@ -110,7 +120,9 @@ impl Client for NatsClient {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::error::Error as StdError;
 
+    const ETCD_URL: &str = "localhost:2379";
     const NATS_URL: &str = "http://localhost:4222";
 
     #[test]
@@ -135,16 +147,16 @@ mod tests {
             .build();
         client.connect()?;
 
-        let target_server = Server {
+        let target_server = Arc::new(Server {
             id: ServerId::from("my_id"),
             kind: ServerKind::from("metagame"),
             metadata: HashMap::new(),
             hostname: "hostname".to_owned(),
             frontend: false,
-        };
+        });
 
         let response = client.call(
-            &target_server,
+            target_server,
             protos::Request {
                 r#type: protos::RpcType::User as i32,
                 msg: Some(protos::Msg {
@@ -174,24 +186,34 @@ mod tests {
     }
 
     #[test]
-    fn nats_request_works() -> Result<(), Error> {
+    fn nats_request_works() -> Result<(), Box<dyn StdError>> {
+        async fn start_service_disovery() -> Result<EtcdLazy, etcd_client::Error> {
+            let sv = Server {
+                id: ServerId::from("1234567"),
+                kind: ServerKind::from("room"),
+                frontend: false,
+                hostname: "owiejfoiwejf".to_owned(),
+                metadata: HashMap::new(),
+            };
+            EtcdLazy::new("pitaya".to_owned(), sv, ETCD_URL, Duration::from_secs(50)).await
+        }
+
+        let mut rt = tokio::runtime::Runtime::new()?;
+        let mut service_discovery = rt.block_on(start_service_disovery())?;
+
         let mut client = NatsClientBuilder::new(NATS_URL.to_owned())
             .with_request_timeout(Duration::from_millis(300))
             .build();
         client.connect()?;
 
-        // TODO: fix return value here.
-        return Ok(());
+        let servers_by_kind = rt.block_on(async {
+            service_discovery
+                .servers_by_kind(&ServerKind::from("room"))
+                .await
+                .unwrap()
+        });
 
-        let id = "455436e0-e4b7-4072-ad68-e1c9a0f1a57d";
-
-        let target_server = Server {
-            id: ServerId::from(id),
-            kind: ServerKind::from("room"),
-            metadata: HashMap::new(),
-            hostname: "hostname".to_owned(),
-            frontend: false,
-        };
+        assert_eq!(servers_by_kind.len(), 1);
 
         let rpc_data = r#"{
             "name": "superMessage",
@@ -199,7 +221,7 @@ mod tests {
         }"#;
 
         let response: protos::Response = client.call(
-            &target_server,
+            servers_by_kind[0].clone(),
             protos::Request {
                 r#type: protos::RpcType::User as i32,
                 msg: Some(protos::Msg {
@@ -214,12 +236,10 @@ mod tests {
             },
         )?;
 
-        if let Some(error) = response.error {
-            panic!("received error: code={} msg={}", error.code, error.msg);
-        } else {
-            let data_str = String::from_utf8_lossy(&response.data);
-            panic!("response string: {}", data_str);
-        }
+        assert!(response.error.is_none());
+
+        let data_str = String::from_utf8_lossy(&response.data);
+        assert!(data_str.contains("success"));
 
         client.close()?;
         Ok(())

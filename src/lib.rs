@@ -21,10 +21,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize, Clone)]
-struct ServerKind(String);
+pub struct ServerKind(String);
 
 impl ServerKind {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self(String::new())
     }
 }
@@ -36,10 +36,10 @@ impl From<&str> for ServerKind {
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize, Clone)]
-struct ServerId(String);
+pub struct ServerId(String);
 
 impl ServerId {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self(String::new())
     }
 }
@@ -51,7 +51,7 @@ impl From<&str> for ServerId {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Server {
+pub struct Server {
     pub id: ServerId,
     #[serde(rename = "type")]
     pub kind: ServerKind,

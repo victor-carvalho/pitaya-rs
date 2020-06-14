@@ -11,13 +11,13 @@ use tokio::sync::broadcast;
 mod tasks;
 
 #[derive(Debug, Clone)]
-enum Notification {
+pub enum Notification {
     ServerAdded(Arc<Server>),
     ServerRemoved(ServerId),
 }
 
 #[async_trait]
-trait ServiceDiscovery {
+pub(crate) trait ServiceDiscovery {
     async fn server_by_id(
         &mut self,
         id: &ServerId,
@@ -94,7 +94,7 @@ impl ServersCache {
 }
 
 // This service discovery is a lazy implementation.
-struct EtcdLazy {
+pub(crate) struct EtcdLazy {
     client: etcd_client::Client,
     prefix: String,
     this_server: Server,
@@ -527,7 +527,7 @@ mod test {
                 }
             });
 
-            tokio::time::delay_for(Duration::from_millis(100)).await;
+            tokio::time::delay_for(Duration::from_millis(50)).await;
 
             assert_eq!(servers_added.read().unwrap().len(), 0);
             assert_eq!(servers_removed.read().unwrap().len(), 0);
@@ -541,6 +541,10 @@ mod test {
             assert_eq!(servers_removed.read().unwrap().len(), 0);
 
             let servers = sd.servers_by_kind(&ServerKind::from("room")).await?;
+
+            // Wait a little bit, otherwise we'll have a rece condition reading both
+            // RwLocks below.
+            tokio::time::delay_for(Duration::from_millis(50)).await;
 
             assert_eq!(servers.len(), 1);
             assert_eq!(servers_added.read().unwrap().len(), 1);
