@@ -30,6 +30,7 @@ pub(crate) trait ServiceDiscovery {
 struct ServersCache {
     servers_by_id: HashMap<ServerId, Arc<Server>>,
     servers_by_kind: HashMap<ServerKind, HashMap<ServerId, Arc<Server>>>,
+    // Channel for notifying listeners for changes in the cache.
     notification_chan: (
         broadcast::Sender<Notification>,
         broadcast::Receiver<Notification>,
@@ -527,6 +528,8 @@ mod test {
                 }
             });
 
+            // Wait a little bit, otherwise we'll have a rece condition reading both
+            // RwLocks below.
             tokio::time::delay_for(Duration::from_millis(50)).await;
 
             assert_eq!(servers_added.read().unwrap().len(), 0);

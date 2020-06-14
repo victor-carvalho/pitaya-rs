@@ -1,8 +1,4 @@
-use crate::{
-    cluster::discovery::{EtcdLazy, ServiceDiscovery},
-    error::Error,
-    protos, utils, Server, ServerId, ServerKind,
-};
+use crate::{error::Error, protos, utils, Server};
 use async_trait::async_trait;
 use prost::Message;
 use std::sync::Arc;
@@ -119,6 +115,10 @@ impl RpcClient for NatsClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        cluster::discovery::{EtcdLazy, ServiceDiscovery},
+        ServerId, ServerKind,
+    };
     use std::collections::HashMap;
     use std::error::Error as StdError;
 
