@@ -52,11 +52,36 @@ impl NatsRpcServer {
         Ok(())
     }
 
-    pub fn close(&mut self) -> Result<(), Error> {
+    pub fn stop(&mut self) -> Result<(), Error> {
         if let Some((connection, sub_handler)) = self.connection.take() {
             sub_handler.unsubscribe().map_err(|e| Error::Nats(e))?;
             connection.close();
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{ServerId, ServerKind};
+    use std::collections::HashMap;
+    use std::error::Error as StdError;
+
+    const NATS_URL: &str = "http://localhost:4222";
+
+    #[test]
+    fn server_starts_and_stops() -> Result<(), Box<dyn StdError>> {
+        let sv = Arc::new(Server {
+            id: ServerId::from("my-id"),
+            kind: ServerKind::from("room"),
+            metadata: HashMap::new(),
+            frontend: false,
+            hostname: "".to_owned(),
+        });
+        let mut rpc_server = NatsRpcServer::new(sv, NATS_URL.to_owned(), 10);
+        rpc_server.start()?;
+        rpc_server.stop()?;
         Ok(())
     }
 }

@@ -75,11 +75,9 @@ impl NatsClient {
         Ok(())
     }
 
-    pub fn close(&mut self) -> Result<(), Error> {
+    pub fn close(&mut self) {
         if let Some(conn) = self.connection.take() {
-            conn.close().map_err(|e| Error::Nats(e))
-        } else {
-            Ok(())
+            conn.close();
         }
     }
 }
@@ -131,7 +129,7 @@ mod tests {
     fn nats_fails_connection() {
         let mut client = NatsClientBuilder::new("https://nats-io.server:3241".to_owned()).build();
         client.connect().unwrap();
-        client.close().unwrap();
+        client.close();
     }
 
     #[test]
@@ -175,7 +173,7 @@ mod tests {
             _ => panic!("unexpected error"),
         };
 
-        client.close()?;
+        client.close();
         Ok(())
     }
 
@@ -235,7 +233,7 @@ mod tests {
         let data_str = String::from_utf8_lossy(&response.data);
         assert!(data_str.contains("success"));
 
-        client.close()?;
+        client.close();
         Ok(())
     }
 }
