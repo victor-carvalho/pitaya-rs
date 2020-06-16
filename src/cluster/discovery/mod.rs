@@ -17,7 +17,7 @@ pub enum Notification {
 }
 
 #[async_trait]
-pub(crate) trait ServiceDiscovery {
+pub trait ServiceDiscovery {
     async fn server_by_id(
         &mut self,
         id: &ServerId,
@@ -98,7 +98,7 @@ impl ServersCache {
 pub(crate) struct EtcdLazy {
     client: etcd_client::Client,
     prefix: String,
-    this_server: Server,
+    this_server: Arc<Server>,
     lease_id: Option<i64>,
     keep_alive_task: Option<(
         tokio::task::JoinHandle<()>,
@@ -112,7 +112,7 @@ pub(crate) struct EtcdLazy {
 impl EtcdLazy {
     pub(crate) async fn new(
         prefix: String,
-        server: Server,
+        server: Arc<Server>,
         url: &str,
         lease_ttl: Duration,
     ) -> Result<Self, etcd_client::Error> {
@@ -230,7 +230,7 @@ impl EtcdLazy {
     async fn add_server_to_etcd(&mut self) -> Result<(), Error> {
         assert!(self.lease_id.is_some());
         let key = self.get_etcd_server_key();
-        let server_json = serde_json::to_vec(&self.this_server)?;
+        let server_json = serde_json::to_vec(&*self.this_server)?;
         if let Some(lease_id) = self.lease_id {
             let options = etcd_client::PutOptions::new().with_lease(lease_id);
             self.client.put(key, server_json, Some(options)).await?;
@@ -328,14 +328,14 @@ mod test {
     const ETCD_URL: &str = "localhost:2379";
     const INVALID_ETCD_URL: &str = "localhost:1234";
 
-    fn new_server() -> Server {
-        Server {
+    fn new_server() -> Arc<Server> {
+        Arc::new(Server {
             frontend: true,
             hostname: "".to_owned(),
             id: ServerId::new(),
             kind: ServerKind::new(),
             metadata: HashMap::new(),
-        }
+        })
     }
 
     #[test]

@@ -1,13 +1,17 @@
+use crate::ServerKind;
+
 #[derive(Debug)]
 pub enum Error {
     // TODO: add timeout error here as well.
     NatsConnectionNotOpen,
+    NoServersFound(ServerKind),
     MessageEncode(prost::EncodeError),
     MessageDecode(prost::DecodeError),
     Nats(std::io::Error),
     Etcd(etcd_client::Error),
     Json(serde_json::Error),
     TaskJoin(tokio::task::JoinError),
+    InvalidRoute,
 }
 
 impl std::fmt::Display for Error {
@@ -20,6 +24,8 @@ impl std::fmt::Display for Error {
             Error::Etcd(ref e) => write!(f, "etcd: {}", e),
             Error::Json(ref e) => write!(f, "json: {}", e),
             Error::TaskJoin(ref e) => write!(f, "task join: {}", e),
+            Error::NoServersFound(ref k) => write!(f, "no servers for kind: {}", k.0),
+            Error::InvalidRoute => write!(f, "invalid route"),
         }
     }
 }
@@ -27,13 +33,13 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {
     fn cause(&self) -> Option<&dyn std::error::Error> {
         match *self {
-            Error::NatsConnectionNotOpen => None,
             Error::MessageEncode(ref e) => Some(e),
             Error::MessageDecode(ref e) => Some(e),
             Error::Nats(ref e) => Some(e),
             Error::Etcd(ref e) => Some(e),
             Error::Json(ref e) => Some(e),
             Error::TaskJoin(ref e) => Some(e),
+            _ => None,
         }
     }
 }

@@ -3,11 +3,11 @@ use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
 
-trait RpcClient {
+pub trait RpcClient {
     fn call(&self, target: Arc<Server>, req: protos::Request) -> Result<protos::Response, Error>;
 }
 
-struct NatsClientBuilder {
+pub struct NatsClientBuilder {
     pub address: String,
     pub connection_timeout: Duration,
     pub request_timeout: Duration,
@@ -58,7 +58,7 @@ impl NatsClientBuilder {
     }
 }
 
-struct NatsClient {
+pub struct NatsClient {
     address: String,
     connection_timeout: Duration,
     request_timeout: Duration,
@@ -180,13 +180,13 @@ mod tests {
     #[test]
     fn nats_request_works() -> Result<(), Box<dyn StdError>> {
         async fn start_service_disovery() -> Result<EtcdLazy, etcd_client::Error> {
-            let sv = Server {
+            let sv = Arc::new(Server {
                 id: ServerId::from("1234567"),
                 kind: ServerKind::from("room"),
                 frontend: false,
                 hostname: "owiejfoiwejf".to_owned(),
                 metadata: HashMap::new(),
-            };
+            });
             EtcdLazy::new("pitaya".to_owned(), sv, ETCD_URL, Duration::from_secs(50)).await
         }
 

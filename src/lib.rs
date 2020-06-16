@@ -61,10 +61,27 @@ pub struct Server {
 }
 
 #[derive(Debug)]
-struct Route {
-    pub server_type: String,
-    pub handler: String,
-    pub method: String,
+struct Route<'a> {
+    pub server_kind: &'a str,
+    pub handler: &'a str,
+    pub method: &'a str,
+}
+
+impl<'a> std::convert::TryFrom<&'a str> for Route<'a> {
+    type Error = error::Error;
+
+    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        let comps: Vec<&'a str> = value.split(".").collect();
+        if comps.len() == 3 {
+            Ok(Route {
+                server_kind: comps[0],
+                handler: comps[1],
+                method: comps[2],
+            })
+        } else {
+            Err(error::Error::InvalidRoute)
+        }
+    }
 }
 
 #[cfg(test)]
