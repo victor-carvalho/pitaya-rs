@@ -2,6 +2,7 @@ use crate::{error::Error, protos, utils, Server};
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use prost::Message;
+use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
@@ -17,7 +18,7 @@ pub trait RpcServer {
 
 pub struct NatsRpcServer {
     address: String,
-    connection: Option<(nats::Connection, nats::subscription::Handler)>,
+    connection: Arc<Mutex<Option<(nats::Connection, nats::subscription::Handler)>>>,
     max_reconnects: usize,
     this_server: Arc<Server>,
     rpc_channel: (mpsc::Sender<Rpc>, mpsc::Receiver<Rpc>),
@@ -33,7 +34,7 @@ impl NatsRpcServer {
     ) -> Self {
         Self {
             address: address,
-            connection: None,
+            connection: Arc::new(Mutex::new(None)),
             max_reconnects: max_reconnects,
             this_server: this_server,
             rpc_channel: mpsc::channel(max_rpcs_queued),
@@ -51,87 +52,104 @@ impl NatsRpcServer {
     }
 
     pub fn start(&mut self) -> Result<(), Error> {
-        if let Some(_) = self.connection {
+        if self.connection.lock().unwrap().is_some() {
             warn!("nats rpc server was already started!");
             return Ok(());
         }
 
         // TODO(lhahn): add callbacks here for sending metrics.
-        let connection = nats::ConnectionOptions::new()
+        let nats_connection = nats::ConnectionOptions::new()
             .max_reconnects(Some(self.max_reconnects))
             .connect(&self.address)
             .map_err(|e| Error::Nats(e))?;
 
-        let topic = utils::topic_for_server(&self.this_server);
-        info!("rpc server subscribing on topic {}", topic);
-
         let sub = {
+            let topic = utils::topic_for_server(&self.this_server);
+            info!("rpc server subscribing on topic {}", topic);
+
             let sender = self.rpc_channel.0.clone();
             let runtime = self.runtime.clone();
-            connection
+            let connection = self.connection.clone();
+            nats_connection
                 .subscribe(&topic)
                 .map_err(|e| Error::Nats(e))?
                 .with_handler(move |message| {
-                    let mut sender = sender.clone();
-                    let req = Message::decode(message.data.as_ref())?;
-                    let (responder, response_receiver) = oneshot::channel();
-
-                    match sender.try_send(Rpc {
-                        req: req,
-                        responder: responder,
-                    }) {
-                        Ok(_) => {
-                            let runtime = runtime.lock().unwrap();
-                            // For the moment we are ignoring the handle returned by the task.
-                            // Worst case scenario we will have to kill the task in the middle of its processing
-                            // at the end of the program.
-                            let _ = runtime.spawn(async move {
-                                match response_receiver.await {
-                                    Ok(response) => {
-                                        // FIXME: this does not compile. Fix issue with lifetime.
-                                        // self.respond("", response);
-                                    }
-                                    Err(e) => {
-                                        // Errors happen here if the channel was closed before sending a message.
-                                        error!("failed to receive response from RPC: {}", e)
-                                    }
-                                }
-                            });
-                            debug!("received request from nats");
-                        }
-                        Err(mpsc::error::TrySendError::Full(_)) => {
-                            // TODO(lhahn): respond 502 here, and add metric.
-                            warn!("channel is full, dropping request");
-                        }
-                        Err(mpsc::error::TrySendError::Closed(_)) => {
-                            warn!("rpc channel stoped being listened");
-                        }
-                    };
-
-                    info!("received msg: {}", &message);
-                    Ok(())
+                    Self::on_nats_message(message, &sender, &runtime, connection.clone())
                 })
         };
 
-        self.connection = Some((connection, sub));
+        self.connection = Arc::new(Mutex::new(Some((nats_connection, sub))));
         Ok(())
     }
 
-    fn respond(&self, reply_topic: &str, res: protos::Response) {
-        self.connection.as_ref().map(|(conn, _)| {
-            let buffer = {
-                let mut b = Vec::with_capacity(res.encoded_len());
-                res.encode(&mut b).map(|_| b)
+    fn on_nats_message(
+        mut message: nats::Message,
+        sender: &mpsc::Sender<Rpc>,
+        runtime: &Arc<Mutex<tokio::runtime::Runtime>>,
+        conn: Arc<Mutex<Option<(nats::Connection, nats::subscription::Handler)>>>,
+    ) -> std::io::Result<()> {
+        let mut sender = sender.clone();
+        let req = Message::decode(message.data.as_ref())?;
+        let (responder, response_receiver) = oneshot::channel();
+
+        let response_topic = match message.reply.take() {
+            Some(topic) => topic,
+            None => {
+                error!("received empty response topic from nats message");
+                return Ok(());
             }
-            .expect("failed to encode response");
-            let _ = conn.publish(reply_topic, buffer).map_err(|err| {
-                error!("failed to respond rpc: {}", err);
-            });
+        };
+
+        match sender.try_send(Rpc {
+            req: req,
+            responder: responder,
+        }) {
+            Ok(_) => {
+                let runtime = runtime.lock().unwrap();
+                // For the moment we are ignoring the handle returned by the task.
+                // Worst case scenario we will have to kill the task in the middle of its processing
+                // at the end of the program.
+                let _ = runtime.spawn(async move {
+                    match response_receiver.await {
+                        Ok(response) => {
+                            if let Some((ref mut conn, _)) = conn.lock().unwrap().deref_mut() {
+                                Self::respond(conn, &response_topic, response);
+                            }
+                        }
+                        Err(e) => {
+                            // Errors happen here if the channel was closed before sending a message.
+                            error!("failed to receive response from RPC: {}", e)
+                        }
+                    }
+                });
+                debug!("received request from nats");
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                // TODO(lhahn): respond 502 here, and add metric.
+                warn!("channel is full, dropping request");
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                warn!("rpc channel stoped being listened");
+            }
+        };
+
+        info!("received msg: {}", &message);
+        Ok(())
+    }
+
+    fn respond(connection: &nats::Connection, reply_topic: &str, res: protos::Response) {
+        let buffer = {
+            let mut b = Vec::with_capacity(res.encoded_len());
+            res.encode(&mut b).map(|_| b)
+        }
+        .expect("failed to encode response");
+        let _ = connection.publish(reply_topic, buffer).map_err(|err| {
+            error!("failed to respond rpc: {}", err);
         });
     }
 
     pub fn stop(&mut self) -> Result<(), Error> {
-        if let Some((connection, sub_handler)) = self.connection.take() {
+        if let Some((connection, sub_handler)) = self.connection.lock().unwrap().take() {
             sub_handler.unsubscribe().map_err(|e| Error::Nats(e))?;
             connection.close();
         }
