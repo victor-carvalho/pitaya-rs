@@ -4,6 +4,7 @@ use crate::ServerKind;
 pub enum Error {
     // TODO: add timeout error here as well.
     NatsConnectionNotOpen,
+    Tokio(std::io::Error),
     NoServersFound(ServerKind),
     MessageEncode(prost::EncodeError),
     MessageDecode(prost::DecodeError),
@@ -30,6 +31,7 @@ impl std::fmt::Display for Error {
             Error::InvalidRoute => write!(f, "invalid route"),
             Error::RpcServerAlreadyStarted => write!(f, "rpc server has already started"),
             Error::ChannelReceiverClosed => write!(f, "channel receiver closed"),
+            Error::Tokio(ref e) => write!(f, "tokio: {}", e),
         }
     }
 }
@@ -43,6 +45,7 @@ impl std::error::Error for Error {
             Error::Etcd(ref e) => Some(e),
             Error::Json(ref e) => Some(e),
             Error::TaskJoin(ref e) => Some(e),
+            Error::Tokio(ref e) => Some(e),
             _ => None,
         }
     }

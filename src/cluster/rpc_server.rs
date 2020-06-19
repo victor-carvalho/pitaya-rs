@@ -27,20 +27,34 @@ pub struct NatsServerConnection {
     rpc_receiver: mpsc::Receiver<Rpc>,
 }
 
+pub struct Config {
+    pub address: String,
+    pub max_reconnects: usize,
+    pub max_rpcs_queued: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            address: String::from("http://localhost:4222"),
+            max_reconnects: 5,
+            max_rpcs_queued: 100,
+        }
+    }
+}
+
 pub struct NatsRpcServer {
-    address: String,
+    config: Config,
     connection: Arc<Mutex<Option<(nats::Connection, nats::subscription::Handler)>>>,
-    max_reconnects: usize,
     this_server: Arc<Server>,
     runtime: Arc<Mutex<tokio::runtime::Runtime>>,
 }
 
 impl NatsRpcServer {
-    pub fn new(this_server: Arc<Server>, address: String, max_reconnects: usize) -> Self {
+    pub fn new(this_server: Arc<Server>, config: Config) -> Self {
         Self {
-            address: address,
+            config: config,
             connection: Arc::new(Mutex::new(None)),
-            max_reconnects: max_reconnects,
             this_server: this_server,
             runtime: Arc::new(Mutex::new(
                 tokio::runtime::Builder::new()
@@ -55,7 +69,7 @@ impl NatsRpcServer {
         }
     }
 
-    pub fn start(&mut self, max_rpcs_queued: usize) -> Result<NatsServerConnection, Error> {
+    pub fn start(&mut self) -> Result<NatsServerConnection, Error> {
         if self.connection.lock().unwrap().is_some() {
             warn!("nats rpc server was already started!");
             return Err(Error::RpcServerAlreadyStarted);
@@ -63,11 +77,11 @@ impl NatsRpcServer {
 
         // TODO(lhahn): add callbacks here for sending metrics.
         let nats_connection = nats::ConnectionOptions::new()
-            .max_reconnects(Some(self.max_reconnects))
-            .connect(&self.address)
+            .max_reconnects(Some(self.config.max_reconnects))
+            .connect(&self.config.address)
             .map_err(|e| Error::Nats(e))?;
 
-        let (rpc_sender, rpc_receiver) = mpsc::channel(max_rpcs_queued);
+        let (rpc_sender, rpc_receiver) = mpsc::channel(self.config.max_rpcs_queued);
 
         let sub = {
             let topic = utils::topic_for_server(&self.this_server);
@@ -184,13 +198,11 @@ impl Connection for NatsServerConnection {
 mod test {
     use super::*;
     use crate::{
-        cluster::rpc_client::{NatsClientBuilder, RpcClient},
+        cluster::rpc_client::{self, RpcClient},
         ServerId, ServerKind,
     };
     use std::collections::HashMap;
     use std::error::Error as StdError;
-
-    const NATS_URL: &str = "http://localhost:4222";
 
     #[test]
     fn server_starts_and_stops() -> Result<(), Box<dyn StdError>> {
@@ -204,8 +216,8 @@ mod test {
 
         let mut rt = tokio::runtime::Runtime::new()?;
 
-        let mut rpc_server = NatsRpcServer::new(sv.clone(), NATS_URL.to_owned(), 10);
-        let mut rpc_server_conn = rpc_server.start(100)?;
+        let mut rpc_server = NatsRpcServer::new(sv.clone(), Config::default());
+        let mut rpc_server_conn = rpc_server.start()?;
 
         let handle = {
             rt.spawn(async move {
@@ -226,7 +238,7 @@ mod test {
         };
 
         {
-            let mut client = NatsClientBuilder::new(NATS_URL.to_owned()).build();
+            let mut client = rpc_client::NatsClient::new(rpc_client::Config::default());
             client.connect()?;
 
             let res = client.call(

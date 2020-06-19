@@ -7,7 +7,7 @@ pub trait RpcClient {
     fn call(&self, target: Arc<Server>, req: protos::Request) -> Result<protos::Response, Error>;
 }
 
-pub struct NatsClientBuilder {
+pub struct Config {
     pub address: String,
     pub connection_timeout: Duration,
     pub request_timeout: Duration,
@@ -15,62 +15,34 @@ pub struct NatsClientBuilder {
     pub max_pending_messages: u32,
 }
 
-impl NatsClientBuilder {
-    pub fn new(address: String) -> Self {
+impl Default for Config {
+    fn default() -> Self {
         Self {
-            address: address,
-            connection_timeout: Duration::from_secs(5),
-            request_timeout: Duration::from_secs(4),
-            max_reconnection_attempts: 10,
+            address: String::from("http://localhost:4222"),
+            connection_timeout: Duration::from_secs(10),
+            request_timeout: Duration::from_secs(10),
+            max_reconnection_attempts: 5,
             max_pending_messages: 100,
-        }
-    }
-
-    pub fn with_connection_timeout(mut self, t: Duration) -> Self {
-        self.connection_timeout = t;
-        self
-    }
-
-    pub fn with_request_timeout(mut self, t: Duration) -> Self {
-        self.request_timeout = t;
-        self
-    }
-
-    pub fn with_max_reconnection_attempts(mut self, a: u32) -> Self {
-        self.max_reconnection_attempts = a;
-        self
-    }
-
-    pub fn with_max_pending_messages(mut self, m: u32) -> Self {
-        self.max_pending_messages = m;
-        self
-    }
-
-    pub fn build(self) -> NatsClient {
-        NatsClient {
-            address: self.address,
-            connection_timeout: self.connection_timeout,
-            request_timeout: self.request_timeout,
-            max_pending_messages: self.max_pending_messages,
-            max_reconnection_attempts: self.max_reconnection_attempts,
-            connection: None,
         }
     }
 }
 
 pub struct NatsClient {
-    address: String,
-    connection_timeout: Duration,
-    request_timeout: Duration,
-    max_reconnection_attempts: u32,
-    max_pending_messages: u32,
+    config: Config,
     connection: Option<nats::Connection>,
 }
 
 impl NatsClient {
+    pub fn new(config: Config) -> Self {
+        Self {
+            config: config,
+            connection: None,
+        }
+    }
+
     pub fn connect(&mut self) -> Result<(), Error> {
         assert!(self.connection.is_none());
-        let nc = nats::connect(&self.address).map_err(|e| Error::Nats(e))?;
+        let nc = nats::connect(&self.config.address).map_err(|e| Error::Nats(e))?;
         self.connection = Some(nc);
         Ok(())
     }
@@ -95,7 +67,7 @@ impl RpcClient for NatsClient {
         }?;
 
         let message = connection
-            .request_timeout(&topic, &buffer, self.request_timeout)
+            .request_timeout(&topic, &buffer, self.config.request_timeout)
             .map_err(|e| Error::Nats(e))?;
 
         let response = Message::decode(message.data.as_ref())?;
@@ -108,7 +80,7 @@ impl RpcClient for NatsClient {
 mod tests {
     use super::*;
     use crate::{
-        cluster::discovery::{EtcdLazy, ServiceDiscovery},
+        cluster::discovery::{EtcdConfig, EtcdLazy, ServiceDiscovery},
         ServerId, ServerKind,
     };
     use std::collections::HashMap;
@@ -119,24 +91,29 @@ mod tests {
 
     #[test]
     fn nats_rpc_client_can_be_created() {
-        let _client = NatsClientBuilder::new("https://sfdjsdoifj".to_owned())
-            .with_connection_timeout(Duration::from_millis(500))
-            .build();
+        let _client = NatsClient::new(Config {
+            address: "https://sfdjsdoifj".to_owned(),
+            ..Config::default()
+        });
     }
 
     #[test]
     #[should_panic]
     fn nats_fails_connection() {
-        let mut client = NatsClientBuilder::new("https://nats-io.server:3241".to_owned()).build();
+        let mut client = NatsClient::new(Config {
+            address: "https://nats-io.server:3241".to_owned(),
+            ..Config::default()
+        });
         client.connect().unwrap();
         client.close();
     }
 
     #[test]
     fn nats_request_timeout() -> Result<(), Error> {
-        let mut client = NatsClientBuilder::new(NATS_URL.to_owned())
-            .with_request_timeout(Duration::from_millis(300))
-            .build();
+        let mut client = NatsClient::new(Config {
+            request_timeout: Duration::from_millis(300),
+            ..Config::default()
+        });
         client.connect()?;
 
         let target_server = Arc::new(Server {
@@ -187,15 +164,24 @@ mod tests {
                 hostname: "owiejfoiwejf".to_owned(),
                 metadata: HashMap::new(),
             });
-            EtcdLazy::new("pitaya".to_owned(), sv, ETCD_URL, Duration::from_secs(50)).await
+            EtcdLazy::new(
+                sv,
+                EtcdConfig {
+                    prefix: "pitaya".to_owned(),
+                    url: ETCD_URL.to_owned(),
+                    lease_ttl: Duration::from_secs(50),
+                },
+            )
+            .await
         }
 
         let mut rt = tokio::runtime::Runtime::new()?;
         let mut service_discovery = rt.block_on(start_service_disovery())?;
 
-        let mut client = NatsClientBuilder::new(NATS_URL.to_owned())
-            .with_request_timeout(Duration::from_millis(300))
-            .build();
+        let mut client = NatsClient::new(Config {
+            request_timeout: Duration::from_millis(300),
+            ..Config::default()
+        });
         client.connect()?;
 
         let servers_by_kind = rt.block_on(async {
