@@ -6,14 +6,25 @@ use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
+#[derive(Debug)]
 pub struct Rpc {
     req: protos::Request,
     responder: oneshot::Sender<protos::Response>,
 }
 
+impl Rpc {
+    pub fn respond(self, res: protos::Response) -> bool {
+        self.responder.send(res).map(|_| true).unwrap_or(false)
+    }
+}
+
 #[async_trait]
-pub trait RpcServer {
+pub trait Connection {
     async fn next_rpc(&mut self) -> Option<Rpc>;
+}
+
+pub struct NatsServerConnection {
+    rpc_receiver: mpsc::Receiver<Rpc>,
 }
 
 pub struct NatsRpcServer {
@@ -21,23 +32,16 @@ pub struct NatsRpcServer {
     connection: Arc<Mutex<Option<(nats::Connection, nats::subscription::Handler)>>>,
     max_reconnects: usize,
     this_server: Arc<Server>,
-    rpc_channel: (mpsc::Sender<Rpc>, mpsc::Receiver<Rpc>),
     runtime: Arc<Mutex<tokio::runtime::Runtime>>,
 }
 
 impl NatsRpcServer {
-    pub fn new(
-        this_server: Arc<Server>,
-        address: String,
-        max_reconnects: usize,
-        max_rpcs_queued: usize,
-    ) -> Self {
+    pub fn new(this_server: Arc<Server>, address: String, max_reconnects: usize) -> Self {
         Self {
             address: address,
             connection: Arc::new(Mutex::new(None)),
             max_reconnects: max_reconnects,
             this_server: this_server,
-            rpc_channel: mpsc::channel(max_rpcs_queued),
             runtime: Arc::new(Mutex::new(
                 tokio::runtime::Builder::new()
                     .threaded_scheduler()
@@ -51,10 +55,10 @@ impl NatsRpcServer {
         }
     }
 
-    pub fn start(&mut self) -> Result<(), Error> {
+    pub fn start(&mut self, max_rpcs_queued: usize) -> Result<NatsServerConnection, Error> {
         if self.connection.lock().unwrap().is_some() {
             warn!("nats rpc server was already started!");
-            return Ok(());
+            return Err(Error::RpcServerAlreadyStarted);
         }
 
         // TODO(lhahn): add callbacks here for sending metrics.
@@ -63,11 +67,13 @@ impl NatsRpcServer {
             .connect(&self.address)
             .map_err(|e| Error::Nats(e))?;
 
+        let (rpc_sender, rpc_receiver) = mpsc::channel(max_rpcs_queued);
+
         let sub = {
             let topic = utils::topic_for_server(&self.this_server);
             info!("rpc server subscribing on topic {}", topic);
 
-            let sender = self.rpc_channel.0.clone();
+            let sender = rpc_sender;
             let runtime = self.runtime.clone();
             let connection = self.connection.clone();
             nats_connection
@@ -78,8 +84,13 @@ impl NatsRpcServer {
                 })
         };
 
-        self.connection = Arc::new(Mutex::new(Some((nats_connection, sub))));
-        Ok(())
+        self.connection
+            .lock()
+            .unwrap()
+            .replace((nats_connection, sub));
+        Ok(NatsServerConnection {
+            rpc_receiver: rpc_receiver,
+        })
     }
 
     fn on_nats_message(
@@ -91,6 +102,8 @@ impl NatsRpcServer {
         let mut sender = sender.clone();
         let req = Message::decode(message.data.as_ref())?;
         let (responder, response_receiver) = oneshot::channel();
+
+        assert!(conn.lock().unwrap().is_some());
 
         let response_topic = match message.reply.take() {
             Some(topic) => topic,
@@ -113,7 +126,10 @@ impl NatsRpcServer {
                     match response_receiver.await {
                         Ok(response) => {
                             if let Some((ref mut conn, _)) = conn.lock().unwrap().deref_mut() {
+                                debug!("responding rpc");
                                 Self::respond(conn, &response_topic, response);
+                            } else {
+                                error!("CONNECTION NOT OPEN, CANNOT ANSWER");
                             }
                         }
                         Err(e) => {
@@ -158,10 +174,9 @@ impl NatsRpcServer {
 }
 
 #[async_trait]
-impl RpcServer for NatsRpcServer {
+impl Connection for NatsServerConnection {
     async fn next_rpc(&mut self) -> Option<Rpc> {
-        let receiver = &mut self.rpc_channel.1;
-        receiver.recv().await
+        self.rpc_receiver.recv().await
     }
 }
 
@@ -174,14 +189,11 @@ mod test {
     };
     use std::collections::HashMap;
     use std::error::Error as StdError;
-    use std::time::Duration;
 
     const NATS_URL: &str = "http://localhost:4222";
 
     #[test]
     fn server_starts_and_stops() -> Result<(), Box<dyn StdError>> {
-        pretty_env_logger::init();
-
         let sv = Arc::new(Server {
             id: ServerId::from("my-id"),
             kind: ServerKind::from("room"),
@@ -190,8 +202,28 @@ mod test {
             hostname: "".to_owned(),
         });
 
-        let mut rpc_server = NatsRpcServer::new(sv.clone(), NATS_URL.to_owned(), 10, 100);
-        rpc_server.start()?;
+        let mut rt = tokio::runtime::Runtime::new()?;
+
+        let mut rpc_server = NatsRpcServer::new(sv.clone(), NATS_URL.to_owned(), 10);
+        let mut rpc_server_conn = rpc_server.start(100)?;
+
+        let handle = {
+            rt.spawn(async move {
+                loop {
+                    if let Some(rpc) = rpc_server_conn.next_rpc().await {
+                        let res = protos::Response {
+                            data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
+                            error: None,
+                        };
+                        if let Err(_e) = rpc.responder.send(res) {
+                            panic!("failed to respond rpc");
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            })
+        };
 
         {
             let mut client = NatsClientBuilder::new(NATS_URL.to_owned()).build();
@@ -213,14 +245,15 @@ mod test {
                 },
             )?;
 
-            info!("RESULT: {:?}", res);
-
+            assert_eq!(
+                String::from_utf8_lossy(&res.data),
+                "HEY, THIS IS THE SERVER"
+            );
             client.close();
         }
 
-        std::thread::sleep(Duration::from_secs(5));
-
         rpc_server.stop()?;
+        rt.block_on(handle)?;
         Ok(())
     }
 }

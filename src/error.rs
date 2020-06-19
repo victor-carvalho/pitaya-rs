@@ -11,6 +11,8 @@ pub enum Error {
     Etcd(etcd_client::Error),
     Json(serde_json::Error),
     TaskJoin(tokio::task::JoinError),
+    ChannelReceiverClosed,
+    RpcServerAlreadyStarted,
     InvalidRoute,
 }
 
@@ -26,6 +28,8 @@ impl std::fmt::Display for Error {
             Error::TaskJoin(ref e) => write!(f, "task join: {}", e),
             Error::NoServersFound(ref k) => write!(f, "no servers for kind: {}", k.0),
             Error::InvalidRoute => write!(f, "invalid route"),
+            Error::RpcServerAlreadyStarted => write!(f, "rpc server has already started"),
+            Error::ChannelReceiverClosed => write!(f, "channel receiver closed"),
         }
     }
 }
