@@ -2,13 +2,7 @@ pub(crate) mod discovery;
 pub(crate) mod rpc_client;
 pub(crate) mod rpc_server;
 
-use crate::{error::Error, protos, utils, Route, ServerKind};
-use discovery::ServiceDiscovery;
-use log::{debug, error, info};
-use rpc_client::RpcClient;
-use rpc_server::Connection;
-use std::convert::TryFrom;
-use tokio::task;
+pub use rpc_server::Rpc;
 
 // pub struct EtcdNatsCluster {
 //     service_discovery: discovery::EtcdLazy,
