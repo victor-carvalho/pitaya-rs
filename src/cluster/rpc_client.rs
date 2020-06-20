@@ -1,4 +1,5 @@
 use crate::{error::Error, protos, utils, Server};
+use log::trace;
 use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
@@ -56,6 +57,7 @@ impl NatsClient {
 
 impl RpcClient for NatsClient {
     fn call(&self, target: Arc<Server>, req: protos::Request) -> Result<protos::Response, Error> {
+        trace!("NatsClient::call");
         let connection = self
             .connection
             .as_ref()
@@ -66,6 +68,11 @@ impl RpcClient for NatsClient {
             req.encode(&mut b).map(|_| b)
         }?;
 
+        trace!(
+            "request to topic {} with timeout: {}s",
+            topic,
+            self.config.request_timeout.as_secs()
+        );
         let message = connection
             .request_timeout(&topic, &buffer, self.config.request_timeout)
             .map_err(|e| Error::Nats(e))?;

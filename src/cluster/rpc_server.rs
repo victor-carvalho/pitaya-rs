@@ -13,6 +13,10 @@ pub struct Rpc {
 }
 
 impl Rpc {
+    pub fn request(&mut self) -> &protos::Request {
+        &self.req
+    }
+
     pub fn respond(self, res: protos::Response) -> bool {
         self.responder.send(res).map(|_| true).unwrap_or(false)
     }
