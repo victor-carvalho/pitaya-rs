@@ -22,11 +22,14 @@ pub use cluster::{
     Rpc,
 };
 pub use error::Error;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use server::{Server, ServerId, ServerKind};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc, time};
-use tokio::task;
+use tokio::{
+    sync::{mpsc, oneshot},
+    task,
+};
 
 pub mod protos {
     include!(concat!(env!("OUT_DIR"), "/protos.rs"));
@@ -65,8 +68,9 @@ pub struct Pitaya {
     nats_rpc_client: cluster::rpc_client::NatsClient,
     nats_rpc_server: cluster::rpc_server::NatsRpcServer,
     runtime: tokio::runtime::Runtime,
-    shutdown_timeout: time::Duration,
+    _shutdown_timeout: time::Duration,
     listen_for_rpc_task: Option<task::JoinHandle<()>>,
+    graceful_shutdown_task: Option<task::JoinHandle<()>>,
 }
 
 impl Pitaya {
@@ -106,23 +110,43 @@ impl Pitaya {
             nats_rpc_client: client,
             nats_rpc_server: server,
             runtime: rt,
-            shutdown_timeout: shutdown_timeout,
+            _shutdown_timeout: shutdown_timeout,
             listen_for_rpc_task: None,
+            graceful_shutdown_task: None,
         }
     }
 
     pub fn shutdown(mut self) -> Result<(), Error> {
+        let graceful_shutdown_task = self
+            .graceful_shutdown_task
+            .take()
+            .expect("graceful shutdown task should've been created");
+        let mut service_discovery = self
+            .service_discovery
+            .take()
+            .expect("service discovery should've been created");
+        let listen_for_rpc_task = self
+            .listen_for_rpc_task
+            .take()
+            .expect("listen for rpc task should've been created");
+
         info!("shutting down pitaya server");
         self.nats_rpc_client.close();
         self.nats_rpc_server.stop()?;
-        if let Some(ref mut task) = self.listen_for_rpc_task {
-            self.runtime.block_on(async move { task.await })?;
-        }
-        if let Some(ref mut service_discovery) = self.service_discovery {
-            self.runtime
-                .block_on(async move { service_discovery.stop().await })?;
-        }
-        self.runtime.shutdown_timeout(self.shutdown_timeout);
+        self.runtime
+            .block_on(async move { listen_for_rpc_task.await })?;
+        self.runtime
+            .block_on(async move { service_discovery.stop().await })?;
+        self.runtime
+            .block_on(async move { graceful_shutdown_task.await })?;
+
+        debug!("shutting down tokio runtime");
+        // FIXME(lhahn): currently, a bug on Tokio will make shutdown_timeout
+        // always wait, so dropping here will make the shutdown faster,
+        // however with the risk of blocking the server indefinitely.
+        // https://github.com/tokio-rs/tokio/issues/2314
+        // self.runtime.shutdown_timeout(self.shutdown_timeout);
+        drop(self.runtime);
         Ok(())
     }
 
@@ -163,7 +187,7 @@ impl Pitaya {
         }
     }
 
-    fn start<RpcHandler>(&mut self, rpc_handler: RpcHandler) -> Result<(), Error>
+    fn start<RpcHandler>(&mut self, rpc_handler: RpcHandler) -> Result<oneshot::Receiver<()>, Error>
     where
         RpcHandler: FnMut(cluster::Rpc) + Send + 'static,
     {
@@ -171,14 +195,22 @@ impl Pitaya {
         async fn start_etcd(
             server: Arc<Server>,
             config: EtcdConfig,
-            app_die_sender: tokio::sync::oneshot::Sender<()>,
+            app_die_sender: mpsc::Sender<()>,
         ) -> Result<cluster::discovery::EtcdLazy, Error> {
             let mut sd = cluster::discovery::EtcdLazy::new(server, config).await?;
             sd.start(app_die_sender).await?;
             Ok(sd)
         }
 
-        let (app_die_sender, app_die_receiver) = tokio::sync::oneshot::channel();
+        let (graceful_shutdown_sender, graceful_shutdown_receiver) = oneshot::channel();
+        // NOTE(lhahn): I don't expect that we'll attemp to send more than 20 die messages.
+        let (app_die_sender, app_die_receiver) = mpsc::channel(20);
+
+        self.graceful_shutdown_task
+            .replace(self.runtime.spawn(Self::graceful_shutdown_task(
+                graceful_shutdown_sender,
+                app_die_receiver,
+            )));
 
         self.service_discovery.replace({
             let server = self.this_server.clone();
@@ -196,7 +228,51 @@ impl Pitaya {
             )));
 
         info!("fnished starting pitaya server");
-        Ok(())
+        Ok(graceful_shutdown_receiver)
+    }
+
+    async fn graceful_shutdown_task(
+        graceful_shutdown_sender: oneshot::Sender<()>,
+        mut app_die_receiver: mpsc::Receiver<()>,
+    ) {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut signal_hangup =
+            signal(SignalKind::hangup()).expect("failed to register signal handling");
+        let mut signal_interrupt =
+            signal(SignalKind::interrupt()).expect("failed to register signal handling");
+        let mut signal_terminate =
+            signal(SignalKind::terminate()).expect("failed to register signal handling");
+
+        tokio::select! {
+            _ = signal_hangup.recv() => {
+                warn!("received hangup signal");
+                if let Err(_) = graceful_shutdown_sender.send(()) {
+                    error!("failed to send graceful shutdown message, receiver already dropped");
+                }
+                return;
+            }
+            _ = signal_interrupt.recv() => {
+                warn!("received interrupt signal");
+                if let Err(_) = graceful_shutdown_sender.send(()) {
+                    error!("failed to send graceful shutdown message, receiver already dropped");
+                }
+                return;
+            }
+            _ = signal_terminate.recv() => {
+                warn!("received terminate signal");
+                if let Err(_) = graceful_shutdown_sender.send(()) {
+                    error!("failed to send graceful shutdown message, receiver already dropped");
+                }
+                return;
+            }
+            _ = app_die_receiver.recv() => {
+                warn!("received app die message");
+                if let Err(_) = graceful_shutdown_sender.send(()) {
+                    error!("failed to send graceful shutdown message, receiver already dropped");
+                }
+                return;
+            }
+        }
     }
 
     async fn start_listen_for_rpc_task<RpcHandler>(
@@ -282,7 +358,7 @@ where
         self
     }
 
-    pub fn build(self) -> Result<Pitaya, Error> {
+    pub fn build(self) -> Result<(Pitaya, oneshot::Receiver<()>), Error> {
         let mut p = Pitaya::new(
             self.frontend,
             self.server_kind
@@ -292,7 +368,8 @@ where
             self.rpc_server_config,
             self.shutdown_timeout,
         );
-        p.start(self.rpc_handler.expect("you should defined a rpc handler!"))?;
-        Ok(p)
+        let shutdown_receiver =
+            p.start(self.rpc_handler.expect("you should defined a rpc handler!"))?;
+        Ok((p, shutdown_receiver))
     }
 }

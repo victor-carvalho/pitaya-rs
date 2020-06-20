@@ -1,13 +1,14 @@
 extern crate log;
 extern crate pitaya;
 extern crate pretty_env_logger;
+extern crate tokio;
 
-use std::{thread, time};
+use std::time;
 
 fn main() {
     pretty_env_logger::init();
 
-    let mut pitaya_server = pitaya::PitayaBuilder::new()
+    let (mut pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
         .with_server_kind("random-kind")
         .with_rpc_client_config(pitaya::RpcClientConfig {
             request_timeout: time::Duration::from_secs(4),
@@ -55,7 +56,9 @@ fn main() {
         String::from_utf8_lossy(&res.data)
     );
 
-    thread::sleep(time::Duration::from_secs(10));
+    let mut rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
+    rt.block_on(async move { shutdown_receiver.await })
+        .expect("failed to await on shutdown receiver");
 
     let _ = pitaya_server.shutdown().map_err(|e| {
         log::error!("failed to shutdown pitaya: {}", e);

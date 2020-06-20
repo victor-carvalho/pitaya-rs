@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
 mod tasks;
 
@@ -144,10 +144,7 @@ impl EtcdLazy {
         })
     }
 
-    pub(crate) async fn start(
-        &mut self,
-        app_die_sender: tokio::sync::oneshot::Sender<()>,
-    ) -> Result<(), Error> {
+    pub(crate) async fn start(&mut self, app_die_sender: mpsc::Sender<()>) -> Result<(), Error> {
         self.grant_lease(app_die_sender).await?;
         self.add_server_to_etcd().await?;
         self.start_watch().await?;
@@ -167,7 +164,7 @@ impl EtcdLazy {
             watcher.cancel().await?;
             handle.await?;
         }
-        info!("revoking lease");
+        debug!("revoking lease");
         self.revoke_lease().await?;
         Ok(())
     }
@@ -203,10 +200,7 @@ impl EtcdLazy {
         Ok(())
     }
 
-    async fn grant_lease(
-        &mut self,
-        app_die_sender: tokio::sync::oneshot::Sender<()>,
-    ) -> Result<(), Error> {
+    async fn grant_lease(&mut self, app_die_sender: mpsc::Sender<()>) -> Result<(), Error> {
         assert!(self.lease_id.is_none());
         assert!(self.keep_alive_task.is_none());
 
@@ -490,7 +484,7 @@ mod test {
     fn server_lease_works() -> Result<(), Box<dyn StdError>> {
         async fn lease_test() -> Result<(), Box<dyn StdError>> {
             let server = new_server();
-            let (app_die_sender, _app_die_recv) = tokio::sync::oneshot::channel();
+            let (app_die_sender, _app_die_recv) = mpsc::channel(10);
 
             let mut sd = EtcdLazy::new(
                 server,
@@ -531,7 +525,7 @@ mod test {
 
             let mut subscribe_chan = sd.subscribe();
 
-            let (app_die_sender, _app_die_recv) = tokio::sync::oneshot::channel();
+            let (app_die_sender, _app_die_recv) = mpsc::channel(10);
             sd.start(app_die_sender).await?;
 
             let servers_added = Arc::new(RwLock::new(Vec::new()));

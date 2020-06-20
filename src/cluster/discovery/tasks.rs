@@ -3,13 +3,14 @@ use crate::{Server, ServerId, ServerKind};
 use log::{debug, error, info, warn};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 pub(super) async fn lease_keep_alive(
     mut lease_ttl: Duration,
     mut keeper: etcd_client::LeaseKeeper,
     mut stream: etcd_client::LeaseKeepAliveStream,
     mut stop_chan: tokio::sync::oneshot::Receiver<()>,
-    app_die_chan: tokio::sync::oneshot::Sender<()>,
+    mut app_die_chan: mpsc::Sender<()>,
 ) {
     use tokio::time::timeout;
 
@@ -26,7 +27,7 @@ pub(super) async fn lease_keep_alive(
                 // Figure out if a more robust retrying scheme is necessary here.
                 if let Err(e) = keeper.keep_alive().await {
                     error!("failed keep alive request: {}", e);
-                    if let Err(_) = app_die_chan.send(()) {
+                    if let Err(_) = app_die_chan.try_send(()) {
                         error!("failed to send die message");
                     }
                     return;
