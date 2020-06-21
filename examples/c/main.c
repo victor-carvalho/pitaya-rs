@@ -27,12 +27,10 @@ int main()
         &nats_config,
         &sd_config,
         &server,
-        Debug
+        PitayaLogLevel_Trace
     );
 
-    printf("Pitaya server initialized... waiting user input to close");
-
-    getchar();
+    pitaya_wait_shutdown_signal(pitaya);
 
     pitaya_shutdown(pitaya);
 }

@@ -1,6 +1,5 @@
 use crate::{cluster, protos, EtcdConfig, Pitaya, PitayaBuilder, RpcClientConfig, RpcServerConfig};
 use lazy_static::lazy_static;
-use log::error;
 use std::{os::raw::c_char, sync::Mutex, time};
 use tokio::sync::oneshot;
 
@@ -20,12 +19,12 @@ pub struct CServer {
 }
 
 #[repr(C)]
-pub enum LogLevel {
-    Debug = 0,
-    Info = 1,
-    Warn = 2,
-    Error = 3,
-    Critical = 4,
+pub enum PitayaLogLevel {
+    Trace = 0,
+    Debug = 1,
+    Info = 2,
+    Warn = 3,
+    Error = 4,
 }
 
 #[repr(C)]
@@ -60,7 +59,7 @@ pub struct Rpc {
 
 pub struct PitayaServer {
     pitaya_server: Pitaya,
-    shutdown_receiver: oneshot::Receiver<()>,
+    shutdown_receiver: Option<oneshot::Receiver<()>>,
 }
 
 #[no_mangle]
@@ -68,10 +67,26 @@ pub extern "C" fn pitaya_initialize_with_nats(
     nc: *mut CNATSConfig,
     sdConfig: *mut CSDConfig,
     sv: *mut CServer,
-    logLevel: LogLevel,
+    log_level: PitayaLogLevel,
 ) -> *mut PitayaServer {
     // FIXME(lhahn): this is really gambeta.
-    std::env::set_var("RUST_LOG", "pitaya=debug");
+    match log_level {
+        PitayaLogLevel::Trace => {
+            std::env::set_var("RUST_LOG", "pitaya=trace");
+        }
+        PitayaLogLevel::Debug => {
+            std::env::set_var("RUST_LOG", "pitaya=debug");
+        }
+        PitayaLogLevel::Info => {
+            std::env::set_var("RUST_LOG", "pitaya=info");
+        }
+        PitayaLogLevel::Warn => {
+            std::env::set_var("RUST_LOG", "pitaya=warn");
+        }
+        PitayaLogLevel::Error => {
+            std::env::set_var("RUST_LOG", "pitaya=error");
+        }
+    }
     pretty_env_logger::init();
 
     log::info!("initializing global pitaya server");
@@ -104,8 +119,26 @@ pub extern "C" fn pitaya_initialize_with_nats(
 
     Box::into_raw(Box::new(PitayaServer {
         pitaya_server: pitaya_server,
-        shutdown_receiver: shutdown_receiver,
+        shutdown_receiver: Some(shutdown_receiver),
     }))
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_wait_shutdown_signal(pitaya_server: *mut PitayaServer) {
+    assert!(!pitaya_server.is_null());
+    let mut pitaya_server = unsafe { Box::from_raw(pitaya_server) };
+
+    let mut rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    if let Some(shutdown_receiver) = pitaya_server.shutdown_receiver.take() {
+        rt.block_on(async move {
+            let _ = shutdown_receiver.await.map_err(|e| {
+                log::error!("failed to wait for shutdown signal: {}", e);
+            });
+        });
+    }
+
+    // We don't want to deallocate the pitaya server.
+    let _ = Box::into_raw(pitaya_server);
 }
 
 #[no_mangle]
@@ -114,6 +147,6 @@ pub extern "C" fn pitaya_shutdown(pitaya_server: *mut PitayaServer) {
     let pitaya_server = unsafe { Box::from_raw(pitaya_server) };
 
     if let Err(e) = pitaya_server.pitaya_server.shutdown() {
-        error!("failed to shutdown pitaya server: {}", e);
+        log::error!("failed to shutdown pitaya server: {}", e);
     }
 }

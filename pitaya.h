@@ -3,18 +3,17 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-
-typedef enum LogLevel {
-  Debug = 0,
-  Info = 1,
-  Warn = 2,
-  Error = 3,
-  Critical = 4,
-} LogLevel;
+typedef enum {
+  PitayaLogLevel_Trace = 0,
+  PitayaLogLevel_Debug = 1,
+  PitayaLogLevel_Info = 2,
+  PitayaLogLevel_Warn = 3,
+  PitayaLogLevel_Error = 4,
+} PitayaLogLevel;
 
 typedef struct PitayaServer PitayaServer;
 
-typedef struct CNATSConfig {
+typedef struct {
   char *addr;
   int64_t connectionTimeoutMs;
   int32_t requestTimeoutMs;
@@ -24,7 +23,7 @@ typedef struct CNATSConfig {
   int32_t maxPendingMsgs;
 } CNATSConfig;
 
-typedef struct CSDConfig {
+typedef struct {
   char *endpoints;
   char *etcdPrefix;
   char *serverTypeFilters;
@@ -36,7 +35,7 @@ typedef struct CSDConfig {
   int32_t maxNumberOfRetries;
 } CSDConfig;
 
-typedef struct CServer {
+typedef struct {
   char *id;
   char *kind;
   char *metadata;
@@ -47,6 +46,8 @@ typedef struct CServer {
 PitayaServer *pitaya_initialize_with_nats(CNATSConfig *nc,
                                           CSDConfig *sdConfig,
                                           CServer *sv,
-                                          LogLevel logLevel);
+                                          PitayaLogLevel log_level);
 
 void pitaya_shutdown(PitayaServer *pitaya_server);
+
+void pitaya_wait_shutdown_signal(PitayaServer *pitaya_server);
