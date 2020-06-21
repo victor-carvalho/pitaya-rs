@@ -30,6 +30,24 @@ int main()
         PitayaLogLevel_Trace
     );
 
+    printf("Will send RPC...\n");
+
+    uint8_t request_data[30];
+
+    PitayaRpcRequest request = {0};
+    request.data = request_data;
+    request.len = 30;
+
+    PitayaRpcResponse response = {0};
+
+    PitayaError *error = pitaya_send_rpc(pitaya, "room.room.join", &request, &response);
+    if (error) {
+        printf("ERROR ON RPC: code=%s, message=%s\n", error->code, error->message);
+    } else {
+        printf("RPC successful\n");
+    }
+
+
     pitaya_wait_shutdown_signal(pitaya);
 
     pitaya_shutdown(pitaya);

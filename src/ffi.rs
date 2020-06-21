@@ -1,12 +1,12 @@
 use crate::{cluster, protos, EtcdConfig, Pitaya, PitayaBuilder, RpcClientConfig, RpcServerConfig};
-use lazy_static::lazy_static;
-use std::{os::raw::c_char, sync::Mutex, time};
+use prost::Message;
+use std::{ffi::CString, mem, os::raw::c_char, slice, time};
 use tokio::sync::oneshot;
 
 #[repr(C)]
-pub struct CPitayaError {
+pub struct PitayaError {
     code: *mut c_char,
-    msg: *mut c_char,
+    message: *mut c_char,
 }
 
 #[repr(C)]
@@ -52,7 +52,19 @@ pub struct CNATSConfig {
 }
 
 #[repr(C)]
-pub struct Rpc {
+pub struct PitayaRpcRequest {
+    data: *const u8,
+    len: i64,
+}
+
+#[repr(C)]
+pub struct PitayaRpcResponse {
+    data: *const u8,
+    len: i64,
+}
+
+#[repr(C)]
+pub struct PitayaRpc {
     request: *mut u8,
     responder: Box<oneshot::Sender<protos::Response>>,
 }
@@ -149,4 +161,85 @@ pub extern "C" fn pitaya_shutdown(pitaya_server: *mut PitayaServer) {
     if let Err(e) = pitaya_server.pitaya_server.shutdown() {
         log::error!("failed to shutdown pitaya server: {}", e);
     }
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_send_rpc(
+    pitaya_server: *mut PitayaServer,
+    route: *mut c_char,
+    request: *const PitayaRpcRequest,
+    response: *mut PitayaRpcResponse,
+) -> *mut PitayaError {
+    assert!(!request.is_null());
+    assert!(!response.is_null());
+    assert!(!pitaya_server.is_null());
+
+    let mut pitaya_server = unsafe { Box::from_raw(pitaya_server) };
+    let route = unsafe { std::ffi::CStr::from_ptr(route) };
+    let request_data: &[u8] =
+        unsafe { slice::from_raw_parts((*request).data, (*request).len as usize) };
+
+    let route: &str = match route.to_str() {
+        Ok(route) => route,
+        Err(_) => {
+            log::error!("route is invalid UTF8");
+            let _ = Box::into_raw(pitaya_server);
+            return Box::into_raw(Box::new(PitayaError {
+                code: CString::into_raw(CString::new("PIT-400").unwrap()),
+                message: CString::into_raw(CString::new("route is invalid utf8").unwrap()),
+            }));
+        }
+    };
+
+    let request: protos::Request = match Message::decode(request_data) {
+        Ok(r) => r,
+        Err(_) => {
+            log::error!("could not decode request");
+            let _ = Box::into_raw(pitaya_server);
+            return Box::into_raw(Box::new(PitayaError {
+                code: CString::into_raw(CString::new("PIT-400").unwrap()),
+                message: CString::into_raw(CString::new("invalid request bytes").unwrap()),
+            }));
+        }
+    };
+
+    let res = match pitaya_server.pitaya_server.send_rpc(route, request) {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("RPC failed");
+            let _ = Box::into_raw(pitaya_server);
+            return Box::into_raw(Box::new(PitayaError {
+                code: CString::into_raw(CString::new("PIT-500").unwrap()),
+                message: CString::into_raw(CString::new(format!("rpc error: {}", e)).unwrap()),
+            }));
+        }
+    };
+
+    // We don't drop response buffer because we'll pass it to the C code.
+    let response_buffer: mem::ManuallyDrop<Vec<u8>> = {
+        let mut b = Vec::with_capacity(res.encoded_len());
+        match res.encode(&mut b).map(|_| b) {
+            Ok(b) => mem::ManuallyDrop::new(b),
+            Err(e) => {
+                log::error!("received invalid response proto!");
+                let _ = Box::into_raw(pitaya_server);
+                return Box::into_raw(Box::new(PitayaError {
+                    code: CString::into_raw(CString::new("PIT-500").unwrap()),
+                    message: CString::into_raw(
+                        CString::new(format!("invalid response proto: {}", e)).unwrap(),
+                    ),
+                }));
+            }
+        }
+    };
+
+    unsafe {
+        (*response).data = response_buffer.as_ptr();
+        (*response).len = response_buffer.len() as i64;
+    }
+
+    // We don't want to deallocate the pitaya server.
+    let _ = Box::into_raw(pitaya_server);
+
+    std::ptr::null_mut()
 }

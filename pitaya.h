@@ -43,10 +43,30 @@ typedef struct {
   int32_t frontend;
 } CServer;
 
+typedef struct {
+  char *code;
+  char *message;
+} PitayaError;
+
+typedef struct {
+  const uint8_t *data;
+  int64_t len;
+} PitayaRpcRequest;
+
+typedef struct {
+  const uint8_t *data;
+  int64_t len;
+} PitayaRpcResponse;
+
 PitayaServer *pitaya_initialize_with_nats(CNATSConfig *nc,
                                           CSDConfig *sdConfig,
                                           CServer *sv,
                                           PitayaLogLevel log_level);
+
+PitayaError *pitaya_send_rpc(PitayaServer *pitaya_server,
+                             char *route,
+                             const PitayaRpcRequest *request,
+                             PitayaRpcResponse *response);
 
 void pitaya_shutdown(PitayaServer *pitaya_server);
 
