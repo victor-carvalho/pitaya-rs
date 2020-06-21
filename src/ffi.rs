@@ -70,9 +70,11 @@ pub extern "C" fn pitaya_initialize_with_nats(
     sv: *mut CServer,
     logLevel: LogLevel,
 ) -> *mut PitayaServer {
-    log::info!("initializing global pitaya server");
-
+    // FIXME(lhahn): this is really gambeta.
+    std::env::set_var("RUST_LOG", "pitaya=debug");
     pretty_env_logger::init();
+
+    log::info!("initializing global pitaya server");
 
     let (pitaya_server, shutdown_receiver) = PitayaBuilder::new()
         .with_server_kind("random-kind")
