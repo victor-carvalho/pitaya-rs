@@ -5,13 +5,13 @@ use std::{os::raw::c_char, sync::Mutex, time};
 use tokio::sync::oneshot;
 
 #[repr(C)]
-struct CPitayaError {
+pub struct CPitayaError {
     code: *mut c_char,
     msg: *mut c_char,
 }
 
 #[repr(C)]
-struct CServer {
+pub struct CServer {
     id: *mut c_char,
     kind: *mut c_char,
     metadata: *mut c_char,
@@ -20,7 +20,7 @@ struct CServer {
 }
 
 #[repr(C)]
-enum LogLevel {
+pub enum LogLevel {
     Debug = 0,
     Info = 1,
     Warn = 2,
@@ -29,7 +29,7 @@ enum LogLevel {
 }
 
 #[repr(C)]
-struct CSDConfig {
+pub struct CSDConfig {
     endpoints: *mut c_char,
     etcdPrefix: *mut c_char,
     serverTypeFilters: *mut c_char,
@@ -42,7 +42,7 @@ struct CSDConfig {
 }
 
 #[repr(C)]
-struct CNATSConfig {
+pub struct CNATSConfig {
     addr: *mut c_char,
     connectionTimeoutMs: i64,
     requestTimeoutMs: i32,
@@ -53,12 +53,12 @@ struct CNATSConfig {
 }
 
 #[repr(C)]
-struct Rpc {
+pub struct Rpc {
     request: *mut u8,
     responder: Box<oneshot::Sender<protos::Response>>,
 }
 
-struct PitayaServer {
+pub struct PitayaServer {
     pitaya_server: Pitaya,
     shutdown_receiver: oneshot::Receiver<()>,
 }
