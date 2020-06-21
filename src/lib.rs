@@ -1,6 +1,7 @@
 extern crate async_trait;
 extern crate etcd_client;
 extern crate futures;
+extern crate lazy_static;
 extern crate log;
 extern crate nats;
 extern crate pretty_env_logger;
@@ -12,6 +13,7 @@ extern crate uuid;
 
 mod cluster;
 mod error;
+mod ffi;
 mod server;
 mod utils;
 

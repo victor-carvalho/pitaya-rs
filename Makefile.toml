@@ -59,3 +59,11 @@ fi
 rm -f output.log
 '''
 ]
+
+[tasks.generate]
+script_runner = "@shell"
+script = [
+'''
+cbindgen --config cbindgen.toml --crate pitaya-rs --lang c --output pitaya.h
+'''
+]
