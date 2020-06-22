@@ -1,6 +1,13 @@
-use crate::{cluster, protos, EtcdConfig, Pitaya, PitayaBuilder, RpcClientConfig, RpcServerConfig};
+use crate::{protos, EtcdConfig, PitayaBuilder, RpcClientConfig, RpcServerConfig};
 use prost::Message;
-use std::{ffi::CString, mem, os::raw::c_char, slice, time};
+use std::{
+    collections::HashMap,
+    convert::TryFrom,
+    ffi::{c_void, CStr, CString},
+    mem,
+    os::raw::c_char,
+    slice, time,
+};
 use tokio::sync::oneshot;
 
 #[repr(C)]
@@ -10,12 +17,41 @@ pub struct PitayaError {
 }
 
 #[repr(C)]
-pub struct CServer {
+pub struct PitayaServer {
     id: *mut c_char,
     kind: *mut c_char,
     metadata: *mut c_char,
     hostname: *mut c_char,
     frontend: i32,
+}
+
+impl std::convert::TryFrom<*mut PitayaServer> for crate::Server {
+    type Error = *mut PitayaError;
+
+    fn try_from(value: *mut PitayaServer) -> Result<Self, Self::Error> {
+        unsafe {
+            let id = CStr::from_ptr((*value).id).to_str();
+            let kind = CStr::from_ptr((*value).kind).to_str();
+            let metadata = CStr::from_ptr((*value).metadata).to_str();
+            let hostname = CStr::from_ptr((*value).hostname).to_str();
+            let frontend = (*value).frontend == 1;
+
+            match (id, kind, metadata, hostname) {
+                (Ok(id), Ok(kind), Ok(metadata), Ok(hostname)) => Ok(crate::Server {
+                    id: crate::ServerId::from(id),
+                    kind: crate::ServerKind::from(kind),
+                    frontend: frontend,
+                    // TODO(lhahn): parse metadata from json.
+                    metadata: HashMap::new(),
+                    hostname: hostname.to_owned(),
+                }),
+                _ => Err(Box::into_raw(Box::new(PitayaError {
+                    code: CString::into_raw(CString::new("PIT-400").unwrap()),
+                    message: CString::into_raw(CString::new("route is invalid utf8").unwrap()),
+                }))),
+            }
+        }
+    }
 }
 
 #[repr(C)]
@@ -28,7 +64,7 @@ pub enum PitayaLogLevel {
 }
 
 #[repr(C)]
-pub struct CSDConfig {
+pub struct PitayaSDConfig {
     endpoints: *mut c_char,
     etcd_prefix: *mut c_char,
     server_type_filters: *mut c_char,
@@ -41,7 +77,7 @@ pub struct CSDConfig {
 }
 
 #[repr(C)]
-pub struct CNATSConfig {
+pub struct PitayaNATSConfig {
     addr: *mut c_char,
     connection_timeout_ms: i64,
     request_timeout_ms: i32,
@@ -63,24 +99,50 @@ pub struct PitayaRpcResponse {
     len: i64,
 }
 
-#[repr(C)]
-pub struct PitayaRpc {
-    request: *mut u8,
-    responder: Box<oneshot::Sender<protos::Response>>,
-}
+pub type PitayaRpc = crate::cluster::Rpc;
 
-pub struct PitayaServer {
-    pitaya_server: Pitaya,
+pub type PitayaHandleRpcCallback = extern "C" fn(*mut c_void, *mut PitayaRpc);
+pub struct PitayaHandleRpcData(*mut c_void);
+
+pub struct Pitaya {
+    pitaya_server: crate::Pitaya,
     shutdown_receiver: Option<oneshot::Receiver<()>>,
 }
 
 #[no_mangle]
+pub extern "C" fn pitaya_rpc_drop(rpc: *mut PitayaRpc) {
+    assert!(!rpc.is_null());
+    let _ = unsafe { Box::from_raw(rpc) };
+}
+
+unsafe impl Send for PitayaHandleRpcData {}
+
+#[no_mangle]
 pub extern "C" fn pitaya_initialize_with_nats(
-    nc: *mut CNATSConfig,
-    sd_config: *mut CSDConfig,
-    sv: *mut CServer,
+    nc: *mut PitayaNATSConfig,
+    sd_config: *mut PitayaSDConfig,
+    sv: *mut PitayaServer,
     log_level: PitayaLogLevel,
-) -> *mut PitayaServer {
+    handle_rpc_cb: PitayaHandleRpcCallback,
+    handle_rpc_data: *mut c_void,
+    pitaya: *mut *mut Pitaya,
+) -> *mut PitayaError {
+    assert!(!pitaya.is_null());
+    assert!(!sv.is_null());
+    assert!(!nc.is_null());
+    assert!(!sd_config.is_null());
+
+    // This wrapper type is necessary in order to send it to
+    // another thread.
+    let handle_rpc_data = PitayaHandleRpcData(handle_rpc_data);
+
+    let server = match crate::Server::try_from(sv) {
+        Ok(sv) => sv,
+        Err(err) => {
+            return err;
+        }
+    };
+
     // FIXME(lhahn): this is really gambeta.
     match log_level {
         PitayaLogLevel::Trace => {
@@ -104,7 +166,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
     log::info!("initializing global pitaya server");
 
     let (pitaya_server, shutdown_receiver) = PitayaBuilder::new()
-        .with_server_kind("random-kind")
+        .with_server_kind(&server.kind.0)
         .with_rpc_client_config(RpcClientConfig {
             request_timeout: time::Duration::from_secs(4),
             ..Default::default()
@@ -118,25 +180,31 @@ pub extern "C" fn pitaya_initialize_with_nats(
         })
         .with_rpc_handler(move |mut rpc| {
             log::info!("!!!!!!!! received rpc req: {:?}", rpc.request());
-            let res = protos::Response {
-                data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
-                error: None,
-            };
-            if !rpc.respond(res) {
-                log::error!("failed to respond to the server");
-            }
+            let rpc = Box::into_raw(Box::new(rpc));
+            handle_rpc_cb(handle_rpc_data.0, rpc);
+            // let res = protos::Response {
+            //     data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
+            //     error: None,
+            // };
+            // if !rpc.respond(res) {
+            // log::error!("failed to respond to the server");
+            // }
         })
         .build()
         .expect("failed to start pitaya server");
 
-    Box::into_raw(Box::new(PitayaServer {
-        pitaya_server: pitaya_server,
-        shutdown_receiver: Some(shutdown_receiver),
-    }))
+    unsafe {
+        (*pitaya) = Box::into_raw(Box::new(Pitaya {
+            pitaya_server: pitaya_server,
+            shutdown_receiver: Some(shutdown_receiver),
+        }));
+    }
+
+    std::ptr::null_mut()
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_wait_shutdown_signal(pitaya_server: *mut PitayaServer) {
+pub extern "C" fn pitaya_wait_shutdown_signal(pitaya_server: *mut Pitaya) {
     assert!(!pitaya_server.is_null());
     let mut pitaya_server = unsafe { Box::from_raw(pitaya_server) };
 
@@ -154,7 +222,7 @@ pub extern "C" fn pitaya_wait_shutdown_signal(pitaya_server: *mut PitayaServer) 
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_shutdown(pitaya_server: *mut PitayaServer) {
+pub extern "C" fn pitaya_shutdown(pitaya_server: *mut Pitaya) {
     assert!(!pitaya_server.is_null());
     let pitaya_server = unsafe { Box::from_raw(pitaya_server) };
 
@@ -165,7 +233,7 @@ pub extern "C" fn pitaya_shutdown(pitaya_server: *mut PitayaServer) {
 
 #[no_mangle]
 pub extern "C" fn pitaya_send_rpc(
-    pitaya_server: *mut PitayaServer,
+    pitaya_server: *mut Pitaya,
     route: *mut c_char,
     request: *const PitayaRpcRequest,
     response: *mut PitayaRpcResponse,
@@ -175,7 +243,7 @@ pub extern "C" fn pitaya_send_rpc(
     assert!(!pitaya_server.is_null());
 
     let mut pitaya_server = unsafe { Box::from_raw(pitaya_server) };
-    let route = unsafe { std::ffi::CStr::from_ptr(route) };
+    let route = unsafe { CStr::from_ptr(route) };
     let request_data: &[u8] =
         unsafe { slice::from_raw_parts((*request).data, (*request).len as usize) };
 

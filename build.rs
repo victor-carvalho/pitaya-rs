@@ -15,6 +15,7 @@ fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
     let config = cbindgen::Config {
+        tab_width: 4,
         language: cbindgen::Language::C,
         enumeration: cbindgen::EnumConfig {
             prefix_with_name: true,
