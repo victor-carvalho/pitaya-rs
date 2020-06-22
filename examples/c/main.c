@@ -42,7 +42,22 @@ handle_rpc(void *data, PitayaRpc *rpc)
 {
     printf("======================= RECEIVED RPC!!!!\n");
     fflush(stdout);
-    pitaya_rpc_drop(rpc);
+
+    protos_Response protos_response = protos_Response_init_zero;
+    protos_response.has_error = 0;
+    protos_response.data.funcs.encode = write_string;
+    protos_response.data.arg = "RESPONSE FROM C";
+
+    uint8_t response_data[256];
+    pb_ostream_t stream = pb_ostream_from_buffer(response_data, sizeof(response_data));
+    assert(pb_encode(&stream, protos_Response_fields, &protos_response));
+    int64_t response_len = stream.bytes_written;
+
+    PitayaError *err = pitaya_rpc_respond(rpc, response_data, response_len);
+    if (err) {
+        printf("error on respond: code=%s, message=%s\n", err->code, err->message);
+        pitaya_error_drop(err);
+    }
 }
 
 int main()
@@ -82,6 +97,7 @@ int main()
 
     if (err) {
         printf("failed to initialize pitaya: code=%s, message=%s\n", err->code, err->message);
+        pitaya_error_drop(err);
         return 1;
     }
 
@@ -111,6 +127,7 @@ int main()
     err = pitaya_send_rpc(pitaya, "my-server-kind-from-c.room.join", &request, &response);
     if (err) {
         printf("ERROR ON RPC: code=%s, message=%s\n", err->code, err->message);
+        pitaya_error_drop(err);
     } else {
         printf("RPC successful\n");
 
@@ -123,7 +140,7 @@ int main()
         pb_istream_t stream = pb_istream_from_buffer(response.data, response.len);
         assert(pb_decode(&stream, protos_Response_fields, &protos_response));
 
-        printf("DATA RESPONSE: %s\n", (char*)protos_response.data.arg);
+        printf("Received response from server: %s\n", (char*)protos_response.data.arg);
     }
 
     pitaya_wait_shutdown_signal(pitaya);

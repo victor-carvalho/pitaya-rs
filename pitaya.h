@@ -13,7 +13,7 @@ typedef enum {
 
 typedef struct Pitaya Pitaya;
 
-typedef struct Rpc Rpc;
+typedef struct PitayaRpc PitayaRpc;
 
 typedef struct {
     char *code;
@@ -50,8 +50,6 @@ typedef struct {
     int32_t frontend;
 } PitayaServer;
 
-typedef Rpc PitayaRpc;
-
 typedef void (*PitayaHandleRpcCallback)(void*, PitayaRpc*);
 
 typedef struct {
@@ -64,6 +62,8 @@ typedef struct {
     int64_t len;
 } PitayaRpcResponse;
 
+void pitaya_error_drop(PitayaError *error);
+
 PitayaError *pitaya_initialize_with_nats(PitayaNATSConfig *nc,
                                          PitayaSDConfig *sd_config,
                                          PitayaServer *sv,
@@ -72,7 +72,9 @@ PitayaError *pitaya_initialize_with_nats(PitayaNATSConfig *nc,
                                          void *handle_rpc_data,
                                          Pitaya **pitaya);
 
-void pitaya_rpc_drop(PitayaRpc *rpc);
+uint8_t *pitaya_rpc_request(PitayaRpc *rpc, int64_t *len);
+
+PitayaError *pitaya_rpc_respond(PitayaRpc *rpc, const uint8_t *response_data, int64_t response_len);
 
 PitayaError *pitaya_send_rpc(Pitaya *pitaya_server,
                              char *route,

@@ -20,6 +20,10 @@ impl Rpc {
     pub fn respond(self, res: protos::Response) -> bool {
         self.responder.send(res).map(|_| true).unwrap_or(false)
     }
+
+    pub fn responder(self) -> oneshot::Sender<protos::Response> {
+        self.responder
+    }
 }
 
 #[async_trait]

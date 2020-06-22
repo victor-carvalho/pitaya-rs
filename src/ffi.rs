@@ -99,7 +99,10 @@ pub struct PitayaRpcResponse {
     len: i64,
 }
 
-pub type PitayaRpc = crate::cluster::Rpc;
+pub struct PitayaRpc {
+    request: Vec<u8>,
+    responder: oneshot::Sender<protos::Response>,
+}
 
 pub type PitayaHandleRpcCallback = extern "C" fn(*mut c_void, *mut PitayaRpc);
 pub struct PitayaHandleRpcData(*mut c_void);
@@ -110,9 +113,55 @@ pub struct Pitaya {
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_rpc_drop(rpc: *mut PitayaRpc) {
+pub extern "C" fn pitaya_error_drop(error: *mut PitayaError) {
+    let _ = unsafe { Box::from_raw(error) };
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_rpc_request(rpc: *mut PitayaRpc, len: *mut i64) -> *mut u8 {
     assert!(!rpc.is_null());
-    let _ = unsafe { Box::from_raw(rpc) };
+    assert!(!len.is_null());
+    unsafe {
+        *len = (*rpc).request.len() as i64;
+        (*rpc).request.as_mut_ptr()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_rpc_respond(
+    rpc: *mut PitayaRpc,
+    response_data: *const u8,
+    response_len: i64,
+) -> *mut PitayaError {
+    assert!(!rpc.is_null());
+    assert!(!response_data.is_null());
+
+    let rpc = unsafe { Box::from_raw(rpc) };
+
+    let response_slice = unsafe { slice::from_raw_parts(response_data, response_len as usize) };
+
+    let response = match Message::decode(response_slice) {
+        Ok(r) => r,
+        Err(e) => {
+            return Box::into_raw(Box::new(PitayaError {
+                code: CString::into_raw(CString::new("PIT-400").unwrap()),
+                message: CString::into_raw(
+                    CString::new(format!("invalid response bytes: {}", e)).unwrap(),
+                ),
+            }));
+        }
+    };
+
+    let sent = rpc.responder.send(response).map(|_| true).unwrap_or(false);
+
+    if sent {
+        std::ptr::null_mut()
+    } else {
+        Box::into_raw(Box::new(PitayaError {
+            code: CString::into_raw(CString::new("PIT-500").unwrap()),
+            message: CString::into_raw(CString::new("could not answer rpc").unwrap()),
+        }))
+    }
 }
 
 unsafe impl Send for PitayaHandleRpcData {}
@@ -180,15 +229,18 @@ pub extern "C" fn pitaya_initialize_with_nats(
         })
         .with_rpc_handler(move |mut rpc| {
             log::info!("!!!!!!!! received rpc req: {:?}", rpc.request());
-            let rpc = Box::into_raw(Box::new(rpc));
+            let request_buffer: Vec<u8> = {
+                let mut b = Vec::with_capacity(rpc.request().encoded_len());
+                rpc.request()
+                    .encode(&mut b)
+                    .expect("failed to encode request");
+                b
+            };
+            let rpc = Box::into_raw(Box::new(PitayaRpc {
+                request: request_buffer,
+                responder: rpc.responder(),
+            }));
             handle_rpc_cb(handle_rpc_data.0, rpc);
-            // let res = protos::Response {
-            //     data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
-            //     error: None,
-            // };
-            // if !rpc.respond(res) {
-            // log::error!("failed to respond to the server");
-            // }
         })
         .build()
         .expect("failed to start pitaya server");

@@ -1,4 +1,4 @@
-use super::{Server, ServerId, ServerKind};
+use super::{Server, ServerKind};
 use rand::Rng;
 use std::sync::Arc;
 
