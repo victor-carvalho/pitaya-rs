@@ -1,20 +1,34 @@
 #include <stdio.h>
 #include <pitaya.h>
 
+#include "nanopb/pb.h"
+#include "nanopb/pb_common.h"
+#include "nanopb/pb_common.c"
+#include "nanopb/pb_encode.c"
+#include "nanopb/pb_decode.c"
+
+#include "error.pb.h"
+#include "error.pb.c"
+#include "msg.pb.c"
+#include "session.pb.c"
+#include "pitaya.pb.c"
+#include "request.pb.c"
+#include "response.pb.c"
+
 int main()
 {
     CNATSConfig nats_config = {0};
     nats_config.addr = "http://localhost:4222";
-    nats_config.connectionTimeoutMs = 5000;
-    nats_config.requestTimeoutMs = 5000;
-    nats_config.serverShutdownDeadlineMs = 5000;
-    nats_config.serverMaxNumberOfRpcs = 100;
-    nats_config.maxReconnectionAttempts = 20;
-    nats_config.maxPendingMsgs = 50;
+    nats_config.connection_timeout_ms = 5000;
+    nats_config.request_timeout_ms = 5000;
+    nats_config.server_shutdown_deadline_ms = 5000;
+    nats_config.server_max_number_of_rpcs = 100;
+    nats_config.max_reconnection_attempts = 20;
+    nats_config.max_pending_msgs = 50;
 
     CSDConfig sd_config = {0};
     sd_config.endpoints = "localhost:2379";
-    sd_config.etcdPrefix = "pitaya";
+    sd_config.etcd_prefix = "pitaya";
 
     CServer server = {0};
     server.id = "my-server-id-from-c";

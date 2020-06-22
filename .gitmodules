@@ -1,3 +1,6 @@
 [submodule "pitaya-protos"]
 	path = pitaya-protos
 	url = https://github.com/topfreegames/pitaya-protos
+[submodule "examples/c/nanopb"]
+	path = examples/c/nanopb
+	url = https://github.com/nanopb/nanopb

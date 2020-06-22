@@ -15,24 +15,24 @@ typedef struct PitayaServer PitayaServer;
 
 typedef struct {
   char *addr;
-  int64_t connectionTimeoutMs;
-  int32_t requestTimeoutMs;
-  int32_t serverShutdownDeadlineMs;
-  int32_t serverMaxNumberOfRpcs;
-  int32_t maxReconnectionAttempts;
-  int32_t maxPendingMsgs;
+  int64_t connection_timeout_ms;
+  int32_t request_timeout_ms;
+  int32_t server_shutdown_deadline_ms;
+  int32_t server_max_number_of_rpcs;
+  int32_t max_reconnection_attempts;
+  int32_t max_pending_msgs;
 } CNATSConfig;
 
 typedef struct {
   char *endpoints;
-  char *etcdPrefix;
-  char *serverTypeFilters;
-  int32_t heartbeatTTLSec;
-  int32_t logHeartbeat;
-  int32_t logServerSync;
-  int32_t logServerDetails;
-  int32_t syncServersIntervalSec;
-  int32_t maxNumberOfRetries;
+  char *etcd_prefix;
+  char *server_type_filters;
+  int32_t heartbeat_ttl_sec;
+  int32_t log_heartbeat;
+  int32_t log_server_sync;
+  int32_t log_server_details;
+  int32_t sync_servers_interval_sec;
+  int32_t max_number_of_retries;
 } CSDConfig;
 
 typedef struct {
@@ -59,7 +59,7 @@ typedef struct {
 } PitayaRpcResponse;
 
 PitayaServer *pitaya_initialize_with_nats(CNATSConfig *nc,
-                                          CSDConfig *sdConfig,
+                                          CSDConfig *sd_config,
                                           CServer *sv,
                                           PitayaLogLevel log_level);
 

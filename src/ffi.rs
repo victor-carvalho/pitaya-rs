@@ -30,25 +30,25 @@ pub enum PitayaLogLevel {
 #[repr(C)]
 pub struct CSDConfig {
     endpoints: *mut c_char,
-    etcdPrefix: *mut c_char,
-    serverTypeFilters: *mut c_char,
-    heartbeatTTLSec: i32,
-    logHeartbeat: i32,
-    logServerSync: i32,
-    logServerDetails: i32,
-    syncServersIntervalSec: i32,
-    maxNumberOfRetries: i32,
+    etcd_prefix: *mut c_char,
+    server_type_filters: *mut c_char,
+    heartbeat_ttl_sec: i32,
+    log_heartbeat: i32,
+    log_server_sync: i32,
+    log_server_details: i32,
+    sync_servers_interval_sec: i32,
+    max_number_of_retries: i32,
 }
 
 #[repr(C)]
 pub struct CNATSConfig {
     addr: *mut c_char,
-    connectionTimeoutMs: i64,
-    requestTimeoutMs: i32,
-    serverShutdownDeadlineMs: i32,
-    serverMaxNumberOfRpcs: i32,
-    maxReconnectionAttempts: i32,
-    maxPendingMsgs: i32,
+    connection_timeout_ms: i64,
+    request_timeout_ms: i32,
+    server_shutdown_deadline_ms: i32,
+    server_max_number_of_rpcs: i32,
+    max_reconnection_attempts: i32,
+    max_pending_msgs: i32,
 }
 
 #[repr(C)]
@@ -77,7 +77,7 @@ pub struct PitayaServer {
 #[no_mangle]
 pub extern "C" fn pitaya_initialize_with_nats(
     nc: *mut CNATSConfig,
-    sdConfig: *mut CSDConfig,
+    sd_config: *mut CSDConfig,
     sv: *mut CServer,
     log_level: PitayaLogLevel,
 ) -> *mut PitayaServer {
