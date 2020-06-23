@@ -95,7 +95,7 @@ impl NatsRpcServer {
 
         let sub = {
             let topic = utils::topic_for_server(&self.this_server);
-            let logger = self.logger.new(o!("source" => "on_nats_message"));
+            let logger = self.logger.new(o!());
 
             info!(self.logger, "rpc server subscribing"; "topic" => &topic);
 

@@ -145,7 +145,7 @@ impl EtcdLazy {
             client: client,
             this_server: server,
             servers_cache: Arc::new(RwLock::new(ServersCache::new(
-                logger.new(o!("source" => "servers_cache")),
+                logger.new(o!()),
                 max_chan_size,
             ))),
             lease_id: None,
@@ -226,7 +226,7 @@ impl EtcdLazy {
 
         self.keep_alive_task = Some((
             tokio::spawn(tasks::lease_keep_alive(
-                self.logger.new(o!("source" => "keep_alive_task")),
+                self.logger.new(o!("task" => "keep_alive")),
                 self.config.lease_ttl.clone(),
                 keeper,
                 stream,
@@ -267,7 +267,7 @@ impl EtcdLazy {
 
         info!(self.logger, "starting etcd watch");
         let handle = tokio::spawn(tasks::watch_task(
-            self.logger.new(o!("source" => "watch_task")),
+            self.logger.new(o!("task" => "watch")),
             self.servers_cache.clone(),
             self.config.prefix.clone(),
             watch_stream,
@@ -292,12 +292,7 @@ impl EtcdLazy {
 
     // This function only returns the server without trying to cache servers.
     fn only_server_by_id(&mut self, server_id: &ServerId) -> Option<Arc<Server>> {
-        self.servers_cache
-            .read()
-            .unwrap()
-            .servers_by_id
-            .get(server_id)
-            .map(|sv| sv.clone())
+        self.servers_cache.read().unwrap().by_id(server_id)
     }
 }
 

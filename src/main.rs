@@ -7,12 +7,15 @@ extern crate tokio;
 use slog::{error, info, o, Drain};
 use std::time;
 
-fn main() {
+fn init_logger() -> slog::Logger {
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::CompactFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
-    let root_logger = slog::Logger::root(drain, o!());
+    slog::Logger::root(drain, o!())
+}
 
+fn main() {
+    let root_logger = init_logger();
     let rpc_handler_logger = root_logger.clone();
     let logger = root_logger.clone();
 

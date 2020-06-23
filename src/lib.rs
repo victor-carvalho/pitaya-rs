@@ -107,11 +107,11 @@ impl Pitaya {
             .expect("failed to create tokio runtime");
 
         let client = cluster::rpc_client::NatsClient::new(
-            logger.new(o!("source" => "nats_rpc_client")),
+            logger.new(o!("module" => "rpc_client")),
             rpc_client_config,
         );
         let server = cluster::rpc_server::NatsRpcServer::new(
-            logger.new(o!("source" => "nats_rpc_server")),
+            logger.new(o!("module" => "rpc_server")),
             this_server.clone(),
             rpc_server_config,
         );
@@ -223,7 +223,7 @@ impl Pitaya {
 
         self.graceful_shutdown_task
             .replace(self.runtime.spawn(Self::graceful_shutdown_task(
-                self.logger.new(o!("source" => "graceful_shutdown_task")),
+                self.logger.new(o!("task" => "graceful_shutdown")),
                 graceful_shutdown_sender,
                 app_die_receiver,
             )));
@@ -232,7 +232,7 @@ impl Pitaya {
             let server = self.this_server.clone();
             let config = self.etcd_config.clone();
             self.runtime.block_on(start_etcd(
-                self.logger.new(o!("source" => "etcd_lazy")),
+                self.logger.new(o!("module" => "service_discovery")),
                 server,
                 config,
                 app_die_sender,
@@ -243,7 +243,7 @@ impl Pitaya {
         let nats_rpc_server_connection = self.nats_rpc_server.start()?;
         self.listen_for_rpc_task
             .replace(self.runtime.spawn(Self::start_listen_for_rpc_task(
-                self.logger.new(o!("source" => "start_listen_for_rpc_task")),
+                self.logger.new(o!("task" => "start_listen_for_rpc")),
                 nats_rpc_server_connection,
                 rpc_handler,
             )));

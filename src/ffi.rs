@@ -40,7 +40,7 @@ impl std::convert::TryFrom<*mut PitayaServer> for crate::Server {
             let frontend = (*value).frontend == 1;
 
             match (id, kind, metadata, hostname) {
-                (Ok(id), Ok(kind), Ok(metadata), Ok(hostname)) => Ok(crate::Server {
+                (Ok(id), Ok(kind), Ok(_metadata), Ok(hostname)) => Ok(crate::Server {
                     id: crate::ServerId::from(id),
                     kind: crate::ServerKind::from(kind),
                     frontend: frontend,
@@ -58,18 +58,34 @@ impl std::convert::TryFrom<*mut PitayaServer> for crate::Server {
 }
 
 #[repr(C)]
+#[allow(dead_code)]
 pub enum PitayaLogKind {
     Console = 0,
     Json = 1,
 }
 
 #[repr(C)]
+#[allow(dead_code)]
 pub enum PitayaLogLevel {
     Trace = 0,
     Debug = 1,
     Info = 2,
     Warn = 3,
     Error = 4,
+    Critical = 5,
+}
+
+impl std::convert::Into<slog::Level> for PitayaLogLevel {
+    fn into(self) -> slog::Level {
+        match self {
+            PitayaLogLevel::Trace => slog::Level::Trace,
+            PitayaLogLevel::Debug => slog::Level::Debug,
+            PitayaLogLevel::Info => slog::Level::Info,
+            PitayaLogLevel::Warn => slog::Level::Warning,
+            PitayaLogLevel::Error => slog::Level::Error,
+            PitayaLogLevel::Critical => slog::Level::Critical,
+        }
+    }
 }
 
 #[repr(C)]
@@ -223,12 +239,16 @@ pub extern "C" fn pitaya_initialize_with_nats(
         PitayaLogLevel::Error => {
             std::env::set_var("RUST_LOG", "pitaya=error");
         }
+        PitayaLogLevel::Critical => {
+            std::env::set_var("RUST_LOG", "pitaya=critical");
+        }
     }
 
     let root_logger = match log_kind {
         PitayaLogKind::Console => {
             let decorator = slog_term::TermDecorator::new().build();
-            let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+            let drain = slog_term::CompactFormat::new(decorator).build();
+            let drain = slog::LevelFilter::new(drain, log_level.into()).fuse();
             let drain = slog_async::Async::new(drain).build().fuse();
             slog::Logger::root(drain, o!())
         }
@@ -238,7 +258,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
         ),
     };
 
-    let rpc_handler_logger = root_logger.new(o!("source" => "rpc_handler"));
+    let rpc_handler_logger = root_logger.new(o!());
 
     info!(root_logger, "initializing global pitaya server");
 

@@ -14,6 +14,7 @@ typedef enum {
     PitayaLogLevel_Info = 2,
     PitayaLogLevel_Warn = 3,
     PitayaLogLevel_Error = 4,
+    PitayaLogLevel_Critical = 5,
 } PitayaLogLevel;
 
 typedef struct Pitaya Pitaya;
