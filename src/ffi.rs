@@ -1,12 +1,15 @@
 use crate::{protos, EtcdConfig, PitayaBuilder, RpcClientConfig, RpcServerConfig};
 use prost::Message;
+use slog::{error, info, o, Drain};
 use std::{
     collections::HashMap,
     convert::TryFrom,
     ffi::{c_void, CStr, CString},
     mem,
     os::raw::c_char,
-    slice, time,
+    slice,
+    sync::Mutex,
+    time,
 };
 use tokio::sync::oneshot;
 
@@ -52,6 +55,12 @@ impl std::convert::TryFrom<*mut PitayaServer> for crate::Server {
             }
         }
     }
+}
+
+#[repr(C)]
+pub enum PitayaLogKind {
+    Console = 0,
+    Json = 1,
 }
 
 #[repr(C)]
@@ -164,6 +173,10 @@ pub extern "C" fn pitaya_rpc_respond(
     }
 }
 
+// We are telling rust here that we know it is safe to send the
+// HandleRpcData to another thread. In reality, this is a void* provided
+// by the user, so it could definitely crash the program depending on how the value
+// is used outside of the rust code.
 unsafe impl Send for PitayaHandleRpcData {}
 
 #[no_mangle]
@@ -171,10 +184,11 @@ pub extern "C" fn pitaya_initialize_with_nats(
     nc: *mut PitayaNATSConfig,
     sd_config: *mut PitayaSDConfig,
     sv: *mut PitayaServer,
-    log_level: PitayaLogLevel,
     handle_rpc_cb: PitayaHandleRpcCallback,
     handle_rpc_data: *mut c_void,
     pitaya: *mut *mut Pitaya,
+    log_level: PitayaLogLevel,
+    log_kind: PitayaLogKind,
 ) -> *mut PitayaError {
     assert!(!pitaya.is_null());
     assert!(!sv.is_null());
@@ -210,12 +224,27 @@ pub extern "C" fn pitaya_initialize_with_nats(
             std::env::set_var("RUST_LOG", "pitaya=error");
         }
     }
-    pretty_env_logger::init();
 
-    log::info!("initializing global pitaya server");
+    let root_logger = match log_kind {
+        PitayaLogKind::Console => {
+            let decorator = slog_term::TermDecorator::new().build();
+            let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+            let drain = slog_async::Async::new(drain).build().fuse();
+            slog::Logger::root(drain, o!())
+        }
+        PitayaLogKind::Json => slog::Logger::root(
+            Mutex::new(slog_json::Json::default(std::io::stderr())).map(slog::Fuse),
+            o!("version" => env!("CARGO_PKG_VERSION")),
+        ),
+    };
+
+    let rpc_handler_logger = root_logger.new(o!("source" => "rpc_handler"));
+
+    info!(root_logger, "initializing global pitaya server");
 
     let (pitaya_server, shutdown_receiver) = PitayaBuilder::new()
         .with_server_kind(&server.kind.0)
+        .with_logger(root_logger)
         .with_rpc_client_config(RpcClientConfig {
             request_timeout: time::Duration::from_secs(4),
             ..Default::default()
@@ -228,7 +257,11 @@ pub extern "C" fn pitaya_initialize_with_nats(
             ..EtcdConfig::default()
         })
         .with_rpc_handler(move |mut rpc| {
-            log::info!("!!!!!!!! received rpc req: {:?}", rpc.request());
+            info!(
+                rpc_handler_logger,
+                "!!!!!!!! received rpc req: {:?}",
+                rpc.request()
+            );
             let request_buffer: Vec<u8> = {
                 let mut b = Vec::with_capacity(rpc.request().encoded_len());
                 rpc.request()
@@ -259,12 +292,13 @@ pub extern "C" fn pitaya_initialize_with_nats(
 pub extern "C" fn pitaya_wait_shutdown_signal(pitaya_server: *mut Pitaya) {
     assert!(!pitaya_server.is_null());
     let mut pitaya_server = unsafe { Box::from_raw(pitaya_server) };
+    let logger = pitaya_server.pitaya_server.logger.clone();
 
     let mut rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     if let Some(shutdown_receiver) = pitaya_server.shutdown_receiver.take() {
         rt.block_on(async move {
             let _ = shutdown_receiver.await.map_err(|e| {
-                log::error!("failed to wait for shutdown signal: {}", e);
+                error!(logger, "failed to wait for shutdown signal: {}", e);
             });
         });
     }
@@ -277,9 +311,10 @@ pub extern "C" fn pitaya_wait_shutdown_signal(pitaya_server: *mut Pitaya) {
 pub extern "C" fn pitaya_shutdown(pitaya_server: *mut Pitaya) {
     assert!(!pitaya_server.is_null());
     let pitaya_server = unsafe { Box::from_raw(pitaya_server) };
+    let logger = pitaya_server.pitaya_server.logger.clone();
 
     if let Err(e) = pitaya_server.pitaya_server.shutdown() {
-        log::error!("failed to shutdown pitaya server: {}", e);
+        error!(logger, "failed to shutdown pitaya server: {}", e);
     }
 }
 
@@ -295,6 +330,8 @@ pub extern "C" fn pitaya_send_rpc(
     assert!(!pitaya_server.is_null());
 
     let mut pitaya_server = unsafe { Box::from_raw(pitaya_server) };
+    let logger = pitaya_server.pitaya_server.logger.clone();
+
     let route = unsafe { CStr::from_ptr(route) };
     let request_data: &[u8] =
         unsafe { slice::from_raw_parts((*request).data, (*request).len as usize) };
@@ -302,7 +339,7 @@ pub extern "C" fn pitaya_send_rpc(
     let route: &str = match route.to_str() {
         Ok(route) => route,
         Err(_) => {
-            log::error!("route is invalid UTF8");
+            error!(logger, "route is invalid UTF8");
             let _ = Box::into_raw(pitaya_server);
             return Box::into_raw(Box::new(PitayaError {
                 code: CString::into_raw(CString::new("PIT-400").unwrap()),
@@ -314,7 +351,7 @@ pub extern "C" fn pitaya_send_rpc(
     let request: protos::Request = match Message::decode(request_data) {
         Ok(r) => r,
         Err(_) => {
-            log::error!("could not decode request");
+            error!(logger, "could not decode request");
             let _ = Box::into_raw(pitaya_server);
             return Box::into_raw(Box::new(PitayaError {
                 code: CString::into_raw(CString::new("PIT-400").unwrap()),
@@ -326,7 +363,7 @@ pub extern "C" fn pitaya_send_rpc(
     let res = match pitaya_server.pitaya_server.send_rpc(route, request) {
         Ok(r) => r,
         Err(e) => {
-            log::error!("RPC failed");
+            error!(logger, "RPC failed");
             let _ = Box::into_raw(pitaya_server);
             return Box::into_raw(Box::new(PitayaError {
                 code: CString::into_raw(CString::new("PIT-500").unwrap()),
@@ -341,7 +378,7 @@ pub extern "C" fn pitaya_send_rpc(
         match res.encode(&mut b).map(|_| b) {
             Ok(b) => mem::ManuallyDrop::new(b),
             Err(e) => {
-                log::error!("received invalid response proto!");
+                error!(logger, "received invalid response proto!");
                 let _ = Box::into_raw(pitaya_server);
                 return Box::into_raw(Box::new(PitayaError {
                     code: CString::into_raw(CString::new("PIT-500").unwrap()),

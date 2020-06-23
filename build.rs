@@ -24,10 +24,16 @@ fn main() {
         ..Default::default()
     };
 
-    cbindgen::Builder::new()
+    match cbindgen::Builder::new()
         .with_crate(crate_dir)
         .with_config(config)
         .generate()
-        .expect("Unable to pitaya C bindings")
-        .write_to_file("pitaya.h");
+    {
+        Ok(bindings) => {
+            bindings.write_to_file("pitaya.h");
+        }
+        Err(err) => {
+            println!("failed to generate bindings: {}", err);
+        }
+    }
 }

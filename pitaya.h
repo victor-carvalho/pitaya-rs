@@ -4,6 +4,11 @@
 #include <stdlib.h>
 
 typedef enum {
+    PitayaLogKind_Console = 0,
+    PitayaLogKind_Json = 1,
+} PitayaLogKind;
+
+typedef enum {
     PitayaLogLevel_Trace = 0,
     PitayaLogLevel_Debug = 1,
     PitayaLogLevel_Info = 2,
@@ -67,10 +72,11 @@ void pitaya_error_drop(PitayaError *error);
 PitayaError *pitaya_initialize_with_nats(PitayaNATSConfig *nc,
                                          PitayaSDConfig *sd_config,
                                          PitayaServer *sv,
-                                         PitayaLogLevel log_level,
                                          PitayaHandleRpcCallback handle_rpc_cb,
                                          void *handle_rpc_data,
-                                         Pitaya **pitaya);
+                                         Pitaya **pitaya,
+                                         PitayaLogLevel log_level,
+                                         PitayaLogKind log_kind);
 
 uint8_t *pitaya_rpc_request(PitayaRpc *rpc, int64_t *len);
 

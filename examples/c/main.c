@@ -89,10 +89,11 @@ int main()
         &nats_config,
         &sd_config,
         &server,
-        PitayaLogLevel_Trace,
         handle_rpc,
         NULL,
-        &pitaya
+        &pitaya,
+        PitayaLogLevel_Trace,
+        PitayaLogKind_Console
     );
 
     if (err) {

@@ -1,7 +1,7 @@
 use crate::{error::Error, protos, utils, Server};
 use async_trait::async_trait;
-use log::{debug, error, info, warn};
 use prost::Message;
+use slog::{debug, error, info, o, warn};
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
@@ -56,10 +56,11 @@ pub struct NatsRpcServer {
     connection: Arc<Mutex<Option<(nats::Connection, nats::subscription::Handler)>>>,
     this_server: Arc<Server>,
     runtime: Arc<Mutex<tokio::runtime::Runtime>>,
+    logger: slog::Logger,
 }
 
 impl NatsRpcServer {
-    pub fn new(this_server: Arc<Server>, config: Config) -> Self {
+    pub fn new(logger: slog::Logger, this_server: Arc<Server>, config: Config) -> Self {
         Self {
             config: config,
             connection: Arc::new(Mutex::new(None)),
@@ -74,12 +75,13 @@ impl NatsRpcServer {
                     .build()
                     .expect("failed to create the tokio scheduler"),
             )),
+            logger: logger,
         }
     }
 
     pub fn start(&mut self) -> Result<NatsServerConnection, Error> {
         if self.connection.lock().unwrap().is_some() {
-            warn!("nats rpc server was already started!");
+            warn!(self.logger, "nats rpc server was already started!");
             return Err(Error::RpcServerAlreadyStarted);
         }
 
@@ -93,7 +95,9 @@ impl NatsRpcServer {
 
         let sub = {
             let topic = utils::topic_for_server(&self.this_server);
-            info!("rpc server subscribing on topic {}", topic);
+            let logger = self.logger.new(o!("source" => "on_nats_message"));
+
+            info!(self.logger, "rpc server subscribing"; "topic" => &topic);
 
             let sender = rpc_sender;
             let runtime = self.runtime.clone();
@@ -102,7 +106,7 @@ impl NatsRpcServer {
                 .subscribe(&topic)
                 .map_err(|e| Error::Nats(e))?
                 .with_handler(move |message| {
-                    Self::on_nats_message(message, &sender, &runtime, connection.clone())
+                    Self::on_nats_message(message, &logger, &sender, &runtime, connection.clone())
                 })
         };
 
@@ -117,6 +121,7 @@ impl NatsRpcServer {
 
     fn on_nats_message(
         mut message: nats::Message,
+        logger: &slog::Logger,
         sender: &mpsc::Sender<Rpc>,
         runtime: &Arc<Mutex<tokio::runtime::Runtime>>,
         conn: Arc<Mutex<Option<(nats::Connection, nats::subscription::Handler)>>>,
@@ -130,7 +135,7 @@ impl NatsRpcServer {
         let response_topic = match message.reply.take() {
             Some(topic) => topic,
             None => {
-                error!("received empty response topic from nats message");
+                error!(logger, "received empty response topic from nats message");
                 return Ok(());
             }
         };
@@ -144,46 +149,57 @@ impl NatsRpcServer {
                 // For the moment we are ignoring the handle returned by the task.
                 // Worst case scenario we will have to kill the task in the middle of its processing
                 // at the end of the program.
-                let _ = runtime.spawn(async move {
-                    match response_receiver.await {
-                        Ok(response) => {
-                            if let Some((ref mut conn, _)) = conn.lock().unwrap().deref_mut() {
-                                debug!("responding rpc");
-                                Self::respond(conn, &response_topic, response);
-                            } else {
-                                error!("CONNECTION NOT OPEN, CANNOT ANSWER");
+                debug!(logger, "received request from nats");
+
+                let _ = {
+                    let logger = logger.clone();
+                    runtime.spawn(async move {
+                        match response_receiver.await {
+                            Ok(response) => {
+                                if let Some((ref mut conn, _)) = conn.lock().unwrap().deref_mut() {
+                                    debug!(logger, "responding rpc");
+                                    if let Err(err) = Self::respond(conn, &response_topic, response)
+                                    {
+                                        error!(logger, "failed to respond rpc"; "error" => %err);
+                                    }
+                                } else {
+                                    error!(logger, "CONNECTION NOT OPEN, CANNOT ANSWER");
+                                }
+                            }
+                            Err(e) => {
+                                // Errors happen here if the channel was closed before sending a message.
+                                error!(logger, "failed to receive response from RPC"; "error" => %e);
                             }
                         }
-                        Err(e) => {
-                            // Errors happen here if the channel was closed before sending a message.
-                            error!("failed to receive response from RPC: {}", e)
-                        }
-                    }
-                });
-                debug!("received request from nats");
+                    })
+                };
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
                 // TODO(lhahn): respond 502 here, and add metric.
-                warn!("channel is full, dropping request");
+                warn!(logger, "channel is full, dropping request");
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
-                warn!("rpc channel stoped being listened");
+                warn!(logger, "rpc channel stoped being listened");
             }
         };
 
-        info!("received msg: {}", &message);
+        info!(logger, "received msg"; "message" => %message);
         Ok(())
     }
 
-    fn respond(connection: &nats::Connection, reply_topic: &str, res: protos::Response) {
+    fn respond(
+        connection: &nats::Connection,
+        reply_topic: &str,
+        res: protos::Response,
+    ) -> Result<(), Error> {
         let buffer = {
             let mut b = Vec::with_capacity(res.encoded_len());
             res.encode(&mut b).map(|_| b)
         }
         .expect("failed to encode response");
-        let _ = connection.publish(reply_topic, buffer).map_err(|err| {
-            error!("failed to respond rpc: {}", err);
-        });
+        connection
+            .publish(reply_topic, buffer)
+            .map_err(|err| Error::Nats(err))
     }
 
     pub fn stop(&mut self) -> Result<(), Error> {
@@ -207,7 +223,7 @@ mod test {
     use super::*;
     use crate::{
         cluster::rpc_client::{self, RpcClient},
-        ServerId, ServerKind,
+        test_helpers, ServerId, ServerKind,
     };
     use std::collections::HashMap;
     use std::error::Error as StdError;
@@ -224,7 +240,11 @@ mod test {
 
         let mut rt = tokio::runtime::Runtime::new()?;
 
-        let mut rpc_server = NatsRpcServer::new(sv.clone(), Config::default());
+        let mut rpc_server = NatsRpcServer::new(
+            test_helpers::get_root_logger(),
+            sv.clone(),
+            Config::default(),
+        );
         let mut rpc_server_conn = rpc_server.start()?;
 
         let handle = {
@@ -246,7 +266,10 @@ mod test {
         };
 
         {
-            let mut client = rpc_client::NatsClient::new(rpc_client::Config::default());
+            let mut client = rpc_client::NatsClient::new(
+                test_helpers::get_root_logger(),
+                rpc_client::Config::default(),
+            );
             client.connect()?;
 
             let res = client.call(

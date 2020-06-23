@@ -1,13 +1,14 @@
 extern crate async_trait;
 extern crate etcd_client;
 extern crate futures;
-extern crate lazy_static;
-extern crate log;
 extern crate nats;
-extern crate pretty_env_logger;
 extern crate prost;
 extern crate serde;
 extern crate serde_json;
+extern crate slog;
+extern crate slog_async;
+extern crate slog_json;
+extern crate slog_term;
 extern crate tokio;
 extern crate uuid;
 
@@ -15,6 +16,8 @@ mod cluster;
 mod error;
 mod ffi;
 mod server;
+#[cfg(test)]
+mod test_helpers;
 mod utils;
 
 pub use cluster::{
@@ -24,8 +27,8 @@ pub use cluster::{
     Rpc,
 };
 pub use error::Error;
-use log::{debug, error, info, warn};
 use server::{Server, ServerId, ServerKind};
+use slog::{debug, error, info, o, warn};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc, time};
 use tokio::{
@@ -73,10 +76,12 @@ pub struct Pitaya {
     _shutdown_timeout: time::Duration,
     listen_for_rpc_task: Option<task::JoinHandle<()>>,
     graceful_shutdown_task: Option<task::JoinHandle<()>>,
+    pub(crate) logger: slog::Logger,
 }
 
 impl Pitaya {
     fn new(
+        logger: slog::Logger,
         frontend: bool,
         server_kind: ServerKind,
         etcd_config: cluster::discovery::EtcdConfig,
@@ -94,16 +99,22 @@ impl Pitaya {
             frontend: frontend,
         });
 
-        debug!("this server: {:?}", this_server);
+        debug!(logger, "this server: {:?}", this_server);
 
         // TODO(lhahn): let user parameterize this runtime.
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| Error::Tokio(e))
             .expect("failed to create tokio runtime");
 
-        let client = cluster::rpc_client::NatsClient::new(rpc_client_config);
-        let server =
-            cluster::rpc_server::NatsRpcServer::new(this_server.clone(), rpc_server_config);
+        let client = cluster::rpc_client::NatsClient::new(
+            logger.new(o!("source" => "nats_rpc_client")),
+            rpc_client_config,
+        );
+        let server = cluster::rpc_server::NatsRpcServer::new(
+            logger.new(o!("source" => "nats_rpc_server")),
+            this_server.clone(),
+            rpc_server_config,
+        );
 
         Self {
             this_server: this_server,
@@ -115,6 +126,7 @@ impl Pitaya {
             _shutdown_timeout: shutdown_timeout,
             listen_for_rpc_task: None,
             graceful_shutdown_task: None,
+            logger: logger,
         }
     }
 
@@ -132,7 +144,7 @@ impl Pitaya {
             .take()
             .expect("listen for rpc task should've been created");
 
-        info!("shutting down pitaya server");
+        info!(self.logger, "shutting down pitaya server");
         self.nats_rpc_client.close();
         self.nats_rpc_server.stop()?;
         self.runtime
@@ -142,7 +154,7 @@ impl Pitaya {
         self.runtime
             .block_on(async move { graceful_shutdown_task.await })?;
 
-        debug!("shutting down tokio runtime");
+        debug!(self.logger, "shutting down tokio runtime");
         // FIXME(lhahn): currently, a bug on Tokio will make shutdown_timeout
         // always wait, so dropping here will make the shutdown faster,
         // however with the risk of blocking the server indefinitely.
@@ -159,12 +171,12 @@ impl Pitaya {
     ) -> Result<protos::Response, Error> {
         use cluster::discovery::EtcdLazy;
 
-        debug!("sending rpc");
+        debug!(self.logger, "sending rpc");
 
         let route = Route::try_from(route)?;
         let server_kind = ServerKind::from(route.server_kind);
 
-        debug!("getting servers");
+        debug!(self.logger, "getting servers");
         let servers = if let Some(ref mut service_discovery) = self.service_discovery {
             async fn get_servers(
                 etcd: &mut EtcdLazy,
@@ -179,12 +191,12 @@ impl Pitaya {
             panic!("etcd should be initialized");
         };
 
-        debug!("getting random server");
+        debug!(self.logger, "getting random server");
         if let Some(random_server) = utils::random_server(&servers) {
-            debug!("sending rpc");
+            debug!(self.logger, "sending rpc");
             self.nats_rpc_client.call(random_server, req)
         } else {
-            error!("found no servers for kind {}", server_kind.0);
+            error!(self.logger, "found no servers for kind"; "kind" => &server_kind.0);
             Err(Error::NoServersFound(server_kind))
         }
     }
@@ -193,13 +205,14 @@ impl Pitaya {
     where
         RpcHandler: FnMut(cluster::Rpc) + Send + 'static,
     {
-        info!("starting pitaya server");
+        info!(self.logger, "starting pitaya server");
         async fn start_etcd(
+            logger: slog::Logger,
             server: Arc<Server>,
             config: EtcdConfig,
             app_die_sender: mpsc::Sender<()>,
         ) -> Result<cluster::discovery::EtcdLazy, Error> {
-            let mut sd = cluster::discovery::EtcdLazy::new(server, config).await?;
+            let mut sd = cluster::discovery::EtcdLazy::new(logger, server, config).await?;
             sd.start(app_die_sender).await?;
             Ok(sd)
         }
@@ -210,6 +223,7 @@ impl Pitaya {
 
         self.graceful_shutdown_task
             .replace(self.runtime.spawn(Self::graceful_shutdown_task(
+                self.logger.new(o!("source" => "graceful_shutdown_task")),
                 graceful_shutdown_sender,
                 app_die_receiver,
             )));
@@ -217,23 +231,29 @@ impl Pitaya {
         self.service_discovery.replace({
             let server = self.this_server.clone();
             let config = self.etcd_config.clone();
-            self.runtime
-                .block_on(start_etcd(server, config, app_die_sender))
+            self.runtime.block_on(start_etcd(
+                self.logger.new(o!("source" => "etcd_lazy")),
+                server,
+                config,
+                app_die_sender,
+            ))
         }?);
         self.nats_rpc_client.connect()?;
 
         let nats_rpc_server_connection = self.nats_rpc_server.start()?;
         self.listen_for_rpc_task
             .replace(self.runtime.spawn(Self::start_listen_for_rpc_task(
+                self.logger.new(o!("source" => "start_listen_for_rpc_task")),
                 nats_rpc_server_connection,
                 rpc_handler,
             )));
 
-        info!("fnished starting pitaya server");
+        info!(self.logger, "fnished starting pitaya server");
         Ok(graceful_shutdown_receiver)
     }
 
     async fn graceful_shutdown_task(
+        logger: slog::Logger,
         graceful_shutdown_sender: oneshot::Sender<()>,
         mut app_die_receiver: mpsc::Receiver<()>,
     ) {
@@ -247,30 +267,30 @@ impl Pitaya {
 
         tokio::select! {
             _ = signal_hangup.recv() => {
-                warn!("received hangup signal");
+                warn!(logger, "received hangup signal");
                 if let Err(_) = graceful_shutdown_sender.send(()) {
-                    error!("failed to send graceful shutdown message, receiver already dropped");
+                    error!(logger, "failed to send graceful shutdown message, receiver already dropped");
                 }
                 return;
             }
             _ = signal_interrupt.recv() => {
-                warn!("received interrupt signal");
+                warn!(logger, "received interrupt signal");
                 if let Err(_) = graceful_shutdown_sender.send(()) {
-                    error!("failed to send graceful shutdown message, receiver already dropped");
+                    error!(logger, "failed to send graceful shutdown message, receiver already dropped");
                 }
                 return;
             }
             _ = signal_terminate.recv() => {
-                warn!("received terminate signal");
+                warn!(logger, "received terminate signal");
                 if let Err(_) = graceful_shutdown_sender.send(()) {
-                    error!("failed to send graceful shutdown message, receiver already dropped");
+                    error!(logger, "failed to send graceful shutdown message, receiver already dropped");
                 }
                 return;
             }
             _ = app_die_receiver.recv() => {
-                warn!("received app die message");
+                warn!(logger, "received app die message");
                 if let Err(_) = graceful_shutdown_sender.send(()) {
-                    error!("failed to send graceful shutdown message, receiver already dropped");
+                    error!(logger, "failed to send graceful shutdown message, receiver already dropped");
                 }
                 return;
             }
@@ -278,6 +298,7 @@ impl Pitaya {
     }
 
     async fn start_listen_for_rpc_task<RpcHandler>(
+        logger: slog::Logger,
         mut rpc_server_connection: cluster::rpc_server::NatsServerConnection,
         mut rpc_handler: RpcHandler,
     ) where
@@ -291,7 +312,7 @@ impl Pitaya {
                     rpc_handler(rpc);
                 }
                 None => {
-                    debug!("listen rpc task exiting");
+                    debug!(logger, "listen rpc task exiting");
                     break;
                 }
             }
@@ -307,6 +328,7 @@ pub struct PitayaBuilder<RpcHandler> {
     rpc_server_config: cluster::rpc_server::Config,
     shutdown_timeout: time::Duration,
     rpc_handler: Option<RpcHandler>,
+    logger: Option<slog::Logger>,
 }
 
 impl<RpcHandler> PitayaBuilder<RpcHandler>
@@ -322,7 +344,13 @@ where
             rpc_server_config: cluster::rpc_server::Config::default(),
             shutdown_timeout: time::Duration::from_secs(10),
             rpc_handler: None,
+            logger: None,
         }
+    }
+
+    pub fn with_logger(mut self, logger: slog::Logger) -> Self {
+        self.logger.replace(logger);
+        self
     }
 
     pub fn with_frontend(mut self, frontend: bool) -> Self {
@@ -362,6 +390,8 @@ where
 
     pub fn build(self) -> Result<(Pitaya, oneshot::Receiver<()>), Error> {
         let mut p = Pitaya::new(
+            self.logger
+                .expect("a logger should be passed to PitayaBuilder"),
             self.frontend,
             self.server_kind
                 .expect("server kind should be provided to PitayaBuilder"),

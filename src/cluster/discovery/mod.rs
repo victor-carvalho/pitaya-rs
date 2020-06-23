@@ -1,7 +1,7 @@
 use crate::{error::Error, Server, ServerId, ServerKind};
 use async_trait::async_trait;
 use etcd_client::GetOptions;
-use log::{debug, error, info, warn};
+use slog::{debug, error, info, o, warn};
 use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::sync::{Arc, RwLock};
@@ -35,14 +35,16 @@ struct ServersCache {
         broadcast::Sender<Notification>,
         broadcast::Receiver<Notification>,
     ),
+    logger: slog::Logger,
 }
 
 impl ServersCache {
-    fn new(max_chan_size: usize) -> Self {
+    fn new(logger: slog::Logger, max_chan_size: usize) -> Self {
         Self {
             servers_by_id: HashMap::new(),
             servers_by_kind: HashMap::new(),
             notification_chan: broadcast::channel(max_chan_size),
+            logger: logger,
         }
     }
 
@@ -54,10 +56,13 @@ impl ServersCache {
         self.servers_by_id
             .insert(server.id.clone(), server.clone())
             .map(|old_val| {
-                warn!("[cache] CACHE WAS STALE: updated old server: {:?}", old_val);
+                warn!(
+                    self.logger,
+                    "[cache] CACHE WAS STALE: updated old server"; "server" => ?old_val
+                );
             })
             .or_else(|| {
-                debug!("[cache] server added: {:?}", server);
+                debug!(self.logger, "[cache] added"; "server" => ?server);
                 self.notify(Notification::ServerAdded(server.clone()));
                 None
             });
@@ -73,14 +78,14 @@ impl ServersCache {
 
     fn remove(&mut self, server_kind: &ServerKind, server_id: &ServerId) {
         self.servers_by_id.remove(server_id).map(|_| {
-            debug!("[cache] server removed: {}", server_id.0);
+            debug!(self.logger, "[cache] server removed"; "server_id" => &server_id.0);
             self.notify(Notification::ServerRemoved(server_id.clone()));
         });
         self.servers_by_kind.remove(server_kind);
     }
 
     fn subscribe(&self) -> broadcast::Receiver<Notification> {
-        debug!("adding one more notification subscriber");
+        debug!(self.logger, "adding one more notification subscriber");
         self.notification_chan.0.subscribe()
     }
 
@@ -90,7 +95,7 @@ impl ServersCache {
             .0
             .send(notification.clone())
             .unwrap_or(0);
-        debug!("notified {} receivers of {:?}", notify_count, notification);
+        debug!(self.logger, "notified receivers"; "num" => notify_count, "notification" => ?notification);
     }
 }
 
@@ -123,10 +128,12 @@ pub struct EtcdLazy {
     )>,
     watch_task: Option<(tokio::task::JoinHandle<()>, etcd_client::Watcher)>,
     servers_cache: Arc<RwLock<ServersCache>>,
+    logger: slog::Logger,
 }
 
 impl EtcdLazy {
     pub(crate) async fn new(
+        logger: slog::Logger,
         server: Arc<Server>,
         config: EtcdConfig,
     ) -> Result<Self, etcd_client::Error> {
@@ -137,10 +144,14 @@ impl EtcdLazy {
             config: config,
             client: client,
             this_server: server,
-            servers_cache: Arc::new(RwLock::new(ServersCache::new(max_chan_size))),
+            servers_cache: Arc::new(RwLock::new(ServersCache::new(
+                logger.new(o!("source" => "servers_cache")),
+                max_chan_size,
+            ))),
             lease_id: None,
             keep_alive_task: None,
             watch_task: None,
+            logger: logger,
         })
     }
 
@@ -152,19 +163,19 @@ impl EtcdLazy {
     }
 
     pub(crate) async fn stop(&mut self) -> Result<(), Error> {
-        info!("stopping etcd service discovery");
+        info!(self.logger, "stopping etcd service discovery");
         if let Some((handle, sender)) = self.keep_alive_task.take() {
             let _ = sender.send(()).map_err(|_| {
-                error!("failed to send stop message");
+                error!(self.logger, "failed to send stop message");
             });
             handle.await?;
         }
         if let Some((handle, mut watcher)) = self.watch_task.take() {
-            info!("cancelling watcher");
+            info!(self.logger, "cancelling watcher");
             watcher.cancel().await?;
             handle.await?;
         }
-        debug!("revoking lease");
+        debug!(self.logger, "revoking lease");
         self.revoke_lease().await?;
         Ok(())
     }
@@ -182,8 +193,8 @@ impl EtcdLazy {
 
     async fn cache_server_kind(&mut self, server_kind: &ServerKind) -> Result<(), Error> {
         debug!(
-            "server id not found in cache, filling cache for kind {}",
-            server_kind.0
+            self.logger,
+            "server id not found in cache, filling cache for kind {}", server_kind.0
         );
         let resp = {
             let key_prefix = self.server_kind_prefix(server_kind);
@@ -191,7 +202,7 @@ impl EtcdLazy {
                 .get(key_prefix, Some(GetOptions::new().with_prefix()))
                 .await?
         };
-        debug!("etcd returned {} keys", resp.kvs().len());
+        debug!(self.logger, "etcd returned {} keys", resp.kvs().len());
         for kv in resp.kvs() {
             let server_str = kv.value_str()?;
             let new_server: Arc<Server> = Arc::new(serde_json::from_str(server_str)?);
@@ -215,6 +226,7 @@ impl EtcdLazy {
 
         self.keep_alive_task = Some((
             tokio::spawn(tasks::lease_keep_alive(
+                self.logger.new(o!("source" => "keep_alive_task")),
                 self.config.lease_ttl.clone(),
                 keeper,
                 stream,
@@ -244,7 +256,7 @@ impl EtcdLazy {
         } else {
             unreachable!();
         }
-        info!("added server to etcd");
+        info!(self.logger, "added server to etcd");
         Ok(())
     }
 
@@ -253,8 +265,9 @@ impl EtcdLazy {
         let options = etcd_client::WatchOptions::new().with_prefix();
         let (watcher, watch_stream) = self.client.watch(watch_prefix, Some(options)).await?;
 
-        info!("starting etcd watch");
+        info!(self.logger, "starting etcd watch");
         let handle = tokio::spawn(tasks::watch_task(
+            self.logger.new(o!("source" => "watch_task")),
             self.servers_cache.clone(),
             self.config.prefix.clone(),
             watch_stream,
@@ -304,7 +317,7 @@ impl ServiceDiscovery for EtcdLazy {
                 .get(key_prefix, Some(GetOptions::new().with_prefix()))
                 .await?
         };
-        info!("etcd returned {} keys", resp.kvs().len());
+        info!(self.logger, "etcd returned {} keys", resp.kvs().len());
         self.cache_server_kind(server_kind).await?;
 
         Ok(self.only_server_by_id(server_id))
@@ -330,6 +343,7 @@ impl ServiceDiscovery for EtcdLazy {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::test_helpers;
     use std::error::Error as StdError;
 
     const ETCD_URL: &str = "localhost:2379";
@@ -351,6 +365,7 @@ mod test {
         let server = new_server();
         let _sd = rt.block_on(async move {
             EtcdLazy::new(
+                test_helpers::get_root_logger(),
                 server,
                 EtcdConfig {
                     prefix: "pitaya".to_owned(),
@@ -371,6 +386,7 @@ mod test {
         let _sd = rt
             .block_on(async move {
                 EtcdLazy::new(
+                    test_helpers::get_root_logger(),
                     server,
                     EtcdConfig {
                         prefix: "pitaya".to_owned(),
@@ -389,6 +405,7 @@ mod test {
         let server = new_server();
         let sd = rt.block_on(async move {
             EtcdLazy::new(
+                test_helpers::get_root_logger(),
                 server,
                 EtcdConfig {
                     prefix: "pitaya".to_owned(),
@@ -408,6 +425,7 @@ mod test {
     ) -> Result<(EtcdLazy, Option<Arc<Server>>), Box<dyn StdError>> {
         let server = new_server();
         let mut sd = EtcdLazy::new(
+            test_helpers::get_root_logger(),
             server,
             EtcdConfig {
                 prefix: "pitaya".to_owned(),
@@ -458,6 +476,7 @@ mod test {
         async fn test(server_kind: &ServerKind) -> Result<(EtcdLazy, Vec<Arc<Server>>), Error> {
             let server = new_server();
             let mut sd = EtcdLazy::new(
+                test_helpers::get_root_logger(),
                 server,
                 EtcdConfig {
                     prefix: "pitaya".to_owned(),
@@ -487,6 +506,7 @@ mod test {
             let (app_die_sender, _app_die_recv) = mpsc::channel(10);
 
             let mut sd = EtcdLazy::new(
+                test_helpers::get_root_logger(),
                 server,
                 EtcdConfig {
                     prefix: "pitaya".to_owned(),
@@ -514,6 +534,7 @@ mod test {
         async fn test() -> Result<(), Box<dyn StdError>> {
             let server = new_server();
             let mut sd = EtcdLazy::new(
+                test_helpers::get_root_logger(),
                 server,
                 EtcdConfig {
                     prefix: "pitaya".to_owned(),

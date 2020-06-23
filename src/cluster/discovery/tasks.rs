@@ -1,11 +1,12 @@
 use super::ServersCache;
 use crate::{Server, ServerId, ServerKind};
-use log::{debug, error, info, warn};
+use slog::{debug, error, info, warn};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 pub(super) async fn lease_keep_alive(
+    logger: slog::Logger,
     mut lease_ttl: Duration,
     mut keeper: etcd_client::LeaseKeeper,
     mut stream: etcd_client::LeaseKeepAliveStream,
@@ -14,31 +15,35 @@ pub(super) async fn lease_keep_alive(
 ) {
     use tokio::time::timeout;
 
-    info!("keep alive task started");
+    info!(logger, "keep alive task started");
     loop {
         let seconds_to_wait = lease_ttl.as_secs() as f32 - (lease_ttl.as_secs() as f32 / 3.0);
         assert!(seconds_to_wait > 0.0);
 
-        debug!("waiting for {:.2} seconds", seconds_to_wait);
+        debug!(logger, "waiting for {:.2} seconds", seconds_to_wait);
 
         match timeout(Duration::from_secs(seconds_to_wait as u64), &mut stop_chan).await {
             Err(_) => {
                 // TODO(lhahn): currently, the ttl will fail as soon as it loses connection to etcd.
                 // Figure out if a more robust retrying scheme is necessary here.
                 if let Err(e) = keeper.keep_alive().await {
-                    error!("failed keep alive request: {}", e);
+                    error!(logger, "failed keep alive request: {}", e);
                     if let Err(_) = app_die_chan.try_send(()) {
-                        error!("failed to send die message");
+                        error!(logger, "failed to send die message");
                     }
                     return;
                 }
                 match stream.message().await {
                     Err(_) => {
-                        error!("failed to get keep alive response");
+                        error!(logger, "failed to get keep alive response");
                     }
                     Ok(msg) => {
                         if let Some(response) = msg {
-                            debug!("lease renewed with new ttl of {} seconds", response.ttl());
+                            debug!(
+                                logger,
+                                "lease renewed with new ttl of {} seconds",
+                                response.ttl()
+                            );
                             assert!(response.ttl() > 0);
                             lease_ttl = Duration::from_secs(response.ttl() as u64);
                         } else {
@@ -48,7 +53,10 @@ pub(super) async fn lease_keep_alive(
                 }
             }
             Ok(_) => {
-                info!("received stop message, exiting lease keep alive task");
+                info!(
+                    logger,
+                    "received stop message, exiting lease keep alive task"
+                );
                 return;
             }
         }
@@ -56,17 +64,18 @@ pub(super) async fn lease_keep_alive(
 }
 
 pub(super) async fn watch_task(
+    logger: slog::Logger,
     servers_cache: Arc<RwLock<ServersCache>>,
     prefix: String,
     mut stream: etcd_client::WatchStream,
 ) {
     loop {
-        debug!("watching for etcd changes...");
+        debug!(logger, "watching for etcd changes...");
 
         match stream.message().await {
             Ok(Some(watch_response)) => {
                 if watch_response.canceled() {
-                    info!("watch was cancelled, exiting task");
+                    info!(logger, "watch was cancelled, exiting task");
                     return;
                 }
 
@@ -74,7 +83,7 @@ pub(super) async fn watch_task(
                     let kv = match event.kv() {
                         Some(kv) => kv,
                         None => {
-                            warn!("did not get kv for watch event");
+                            warn!(logger, "did not get kv for watch event");
                             continue;
                         }
                     };
@@ -82,7 +91,7 @@ pub(super) async fn watch_task(
                     let key_str = match kv.key_str() {
                         Ok(v) => v,
                         Err(_) => {
-                            warn!("invalid key string for watch event");
+                            warn!(logger, "invalid key string for watch event");
                             continue;
                         }
                     };
@@ -101,7 +110,7 @@ pub(super) async fn watch_task(
                             let server = match serde_json::from_str::<Server>(value_str) {
                                 Ok(s) => Arc::new(s),
                                 Err(e) => {
-                                    error!("server is not valid json: {}", e);
+                                    error!(logger, "server is not valid json: {}", e);
                                     continue;
                                 }
                             };
@@ -113,7 +122,7 @@ pub(super) async fn watch_task(
                                 match parse_server_kind_and_id(&prefix, key_str) {
                                     Some(a) => a,
                                     None => {
-                                        warn!("could not parse key on deleted server");
+                                        warn!(logger, "could not parse key on deleted server");
                                         continue;
                                     }
                                 };
@@ -128,12 +137,12 @@ pub(super) async fn watch_task(
             }
             Ok(None) => {
                 // TODO(lhahn): if it got a None, is it safe to assume the watch was closed?
-                info!("watch was closed, exiting");
+                info!(logger, "watch was closed, exiting");
                 return;
             }
             Err(e) => {
                 // TODO(lhahn): should we send an event to kill the pod here?
-                error!("failed to get watch message: {}", e);
+                error!(logger, "failed to get watch message: {}", e);
             }
         }
     }

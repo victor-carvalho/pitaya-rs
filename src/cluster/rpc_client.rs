@@ -1,6 +1,6 @@
 use crate::{error::Error, protos, utils, Server};
-use log::trace;
 use prost::Message;
+use slog::trace;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,13 +31,15 @@ impl Default for Config {
 pub struct NatsClient {
     config: Config,
     connection: Option<nats::Connection>,
+    logger: slog::Logger,
 }
 
 impl NatsClient {
-    pub fn new(config: Config) -> Self {
+    pub fn new(logger: slog::Logger, config: Config) -> Self {
         Self {
             config: config,
             connection: None,
+            logger: logger,
         }
     }
 
@@ -57,7 +59,7 @@ impl NatsClient {
 
 impl RpcClient for NatsClient {
     fn call(&self, target: Arc<Server>, req: protos::Request) -> Result<protos::Response, Error> {
-        trace!("NatsClient::call");
+        trace!(self.logger, "NatsClient::call");
         let connection = self
             .connection
             .as_ref()
@@ -69,9 +71,8 @@ impl RpcClient for NatsClient {
         }?;
 
         trace!(
-            "request to topic {} with timeout: {}s",
-            topic,
-            self.config.request_timeout.as_secs()
+            self.logger,
+            "sending nats request"; "topic" => &topic, "timeout" => self.config.request_timeout.as_secs()
         );
         let message = connection
             .request_timeout(&topic, &buffer, self.config.request_timeout)
@@ -88,39 +89,45 @@ mod tests {
     use super::*;
     use crate::{
         cluster::discovery::{EtcdConfig, EtcdLazy, ServiceDiscovery},
-        ServerId, ServerKind,
+        test_helpers, ServerId, ServerKind,
     };
     use std::collections::HashMap;
     use std::error::Error as StdError;
 
-    const ETCD_URL: &str = "localhost:2379";
-    const NATS_URL: &str = "http://localhost:4222";
-
     #[test]
     fn nats_rpc_client_can_be_created() {
-        let _client = NatsClient::new(Config {
-            address: "https://sfdjsdoifj".to_owned(),
-            ..Config::default()
-        });
+        let _client = NatsClient::new(
+            test_helpers::get_root_logger(),
+            Config {
+                address: "https://sfdjsdoifj".to_owned(),
+                ..Config::default()
+            },
+        );
     }
 
     #[test]
     #[should_panic]
     fn nats_fails_connection() {
-        let mut client = NatsClient::new(Config {
-            address: "https://nats-io.server:3241".to_owned(),
-            ..Config::default()
-        });
+        let mut client = NatsClient::new(
+            test_helpers::get_root_logger(),
+            Config {
+                address: "https://nats-io.server:3241".to_owned(),
+                ..Config::default()
+            },
+        );
         client.connect().unwrap();
         client.close();
     }
 
     #[test]
     fn nats_request_timeout() -> Result<(), Error> {
-        let mut client = NatsClient::new(Config {
-            request_timeout: Duration::from_millis(300),
-            ..Config::default()
-        });
+        let mut client = NatsClient::new(
+            test_helpers::get_root_logger(),
+            Config {
+                request_timeout: Duration::from_millis(300),
+                ..Config::default()
+            },
+        );
         client.connect()?;
 
         let target_server = Arc::new(Server {
@@ -172,10 +179,11 @@ mod tests {
                 metadata: HashMap::new(),
             });
             EtcdLazy::new(
+                test_helpers::get_root_logger(),
                 sv,
                 EtcdConfig {
                     prefix: "pitaya".to_owned(),
-                    url: ETCD_URL.to_owned(),
+                    url: test_helpers::ETCD_URL.to_owned(),
                     lease_ttl: Duration::from_secs(50),
                 },
             )
@@ -185,10 +193,13 @@ mod tests {
         let mut rt = tokio::runtime::Runtime::new()?;
         let mut service_discovery = rt.block_on(start_service_disovery())?;
 
-        let mut client = NatsClient::new(Config {
-            request_timeout: Duration::from_millis(300),
-            ..Config::default()
-        });
+        let mut client = NatsClient::new(
+            test_helpers::get_root_logger(),
+            Config {
+                request_timeout: Duration::from_millis(300),
+                ..Config::default()
+            },
+        );
         client.connect()?;
 
         let servers_by_kind = rt.block_on(async {
