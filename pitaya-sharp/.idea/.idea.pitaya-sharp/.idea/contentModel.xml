@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ContentModelStore">
+    <e p="$USER_HOME$/.nuget/packages/xunit.runner.visualstudio/2.4.0/build/netcoreapp1.0/xunit.runner.reporters.netcoreapp10.dll" t="Include" />
+    <e p="$USER_HOME$/.nuget/packages/xunit.runner.visualstudio/2.4.0/build/netcoreapp1.0/xunit.runner.utility.netcoreapp10.dll" t="Include" />
+    <e p="$USER_HOME$/.nuget/packages/xunit.runner.visualstudio/2.4.0/build/netcoreapp1.0/xunit.runner.visualstudio.dotnetcore.testadapter.dll" t="Include" />
+    <e p="$PROJECT_DIR$/../pitaya-protos" t="Include">
+      <e p="bind.proto" t="Include" />
+      <e p="doc.proto" t="Include" />
+      <e p="docmsg.proto" t="Include" />
+      <e p="error.proto" t="Include" />
+      <e p="kick.proto" t="Include" />
+      <e p="msg.proto" t="Include" />
+      <e p="pitaya.proto" t="Include" />
+      <e p="protodescriptor.proto" t="Include" />
+      <e p="push.proto" t="Include" />
+      <e p="request.proto" t="Include" />
+      <e p="response.proto" t="Include" />
+      <e p="session.proto" t="Include" />
+    </e>
+    <e p="$PROJECT_DIR$" t="IncludeFlat">
+      <e p="exampleapp" t="IncludeRecursive">
+        <e p="bin" t="ExcludeRecursive" />
+        <e p="exampleapp.csproj" t="IncludeRecursive" />
+        <e p="gen" t="Include">
+          <e p="Cluster.cs" t="Include" />
+        </e>
+        <e p="Handlers" t="Include">
+          <e p="TestHandler.cs" t="Include" />
+        </e>
+        <e p="obj" t="ExcludeRecursive">
+          <e p="Debug" t="Include">
+            <e p="netcoreapp2.2" t="Include">
+              <e p="exampleapp.AssemblyInfo.cs" t="Include" />
+            </e>
+          </e>
+        </e>
+        <e p="Program.cs" t="Include" />
+        <e p="remotes" t="Include">
+          <e p="TestRemote.cs" t="Include" />
+        </e>
+      </e>
+      <e p="ExampleEFCore" t="IncludeRecursive">
+        <e p="bin" t="ExcludeRecursive" />
+        <e p="ExampleEFCore.csproj" t="IncludeRecursive" />
+        <e p="Migrations" t="Include">
+          <e p="20190328153447_InitialMigration.cs" t="Include" />
+          <e p="20190328153447_InitialMigration.Designer.cs" t="Include" />
+          <e p="ExampleContextModelSnapshot.cs" t="Include" />
+        </e>
+        <e p="obj" t="ExcludeRecursive">
+          <e p="Debug" t="Include">
+            <e p="netcoreapp2.2" t="Include">
+              <e p="ExampleEFCore.AssemblyInfo.cs" t="Include" />
+            </e>
+          </e>
+        </e>
+        <e p="Protos" t="Include">
+          <e p="Answer.proto" t="Include" />
+          <e p="AuthenticateArgs.proto" t="Include" />
+          <e p="ChangeNameArg.proto" t="Include" />
+          <e p="user.proto" t="Include" />
+        </e>
+        <e p="src" t="Include">
+          <e p="App.cs" t="Include" />
+          <e p="Extensions" t="Include">
+            <e p="StringExtensions.cs" t="Include" />
+          </e>
+          <e p="gen" t="Include">
+            <e p="Protos" t="Include">
+              <e p="Answer.cs" t="Include" />
+              <e p="AuthenticateArgs.cs" t="Include" />
+              <e p="ChangeNameArg.cs" t="Include" />
+              <e p="User.cs" t="Include" />
+            </e>
+          </e>
+          <e p="Models" t="Include">
+            <e p="Models.cs" t="Include" />
+          </e>
+          <e p="Servers" t="Include">
+            <e p="BusinessLogic" t="Include">
+              <e p="Handlers" t="Include">
+                <e p="UserHandler.cs" t="Include" />
+              </e>
+            </e>
+          </e>
+        </e>
+      </e>
+      <e p="NPitaya" t="IncludeRecursive">
+        <e p="bin" t="ExcludeRecursive" />
+        <e p="NPitaya.csproj" t="IncludeRecursive" />
+        <e p="obj" t="ExcludeRecursive">
+          <e p="Debug" t="Include">
+            <e p="net461" t="Include">
+              <e p="NPitaya.AssemblyInfo.cs" t="Include" />
+            </e>
+            <e p="netstandard2.0" t="Include">
+              <e p="NPitaya.AssemblyInfo.cs" t="Include" />
+            </e>
+          </e>
+        </e>
+        <e p="src" t="Include">
+          <e p="Constants" t="Include">
+            <e p="Routes.cs" t="Include" />
+          </e>
+          <e p="gen" t="Include">
+            <e p="Bind.cs" t="Include" />
+            <e p="Doc.cs" t="Include" />
+            <e p="Docmsg.cs" t="Include" />
+            <e p="Error.cs" t="Include" />
+            <e p="Kick.cs" t="Include" />
+            <e p="Msg.cs" t="Include" />
+            <e p="Pitaya.cs" t="Include" />
+            <e p="Protodescriptor.cs" t="Include" />
+            <e p="Push.cs" t="Include" />
+            <e p="Request.cs" t="Include" />
+            <e p="Response.cs" t="Include" />
+            <e p="Session.cs" t="Include" />
+          </e>
+          <e p="lib" t="Include">
+            <e p="net461" t="Include">
+              <e p="Prometheus.NetStandard.dll" t="Include" />
+              <e p="StatsdClient.dll" t="Include" />
+            </e>
+            <e p="netstandard2.0" t="Include">
+              <e p="Prometheus.NetStandard.dll" t="Include" />
+              <e p="StatsdClient.dll" t="Include" />
+            </e>
+          </e>
+          <e p="Metrics" t="Include">
+            <e p="Constants.cs" t="Include" />
+            <e p="IMetricsReporter.cs" t="Include" />
+            <e p="MetricsReporters.cs" t="Include" />
+            <e p="PrometheusMetricsReporter.cs" t="Include" />
+            <e p="StatsdMetricsReporter.cs" t="Include" />
+          </e>
+          <e p="Models" t="Include">
+            <e p="BaseHandler.cs" t="Include" />
+            <e p="BaseRemote.cs" t="Include" />
+            <e p="IBaseRemote.cs" t="Include" />
+            <e p="Logger.cs" t="Include" />
+            <e p="PitayaSession.cs" t="Include" />
+            <e p="Remote.cs" t="Include" />
+            <e p="RemoteMethod.cs" t="Include" />
+          </e>
+          <e p="NativeInterop.cs" t="Include" />
+          <e p="PitayaCluster.API.cs" t="Include" />
+          <e p="PitayaCluster.Native.cs" t="Include" />
+          <e p="PitayaCluster.RPC.cs" t="Include" />
+          <e p="PitayaException.cs" t="Include" />
+          <e p="Serializer" t="Include">
+            <e p="ISerializer.cs" t="Include" />
+            <e p="JSONSerializer.cs" t="Include" />
+            <e p="ProtobufSerializer.cs" t="Include" />
+            <e p="SerializerUtils.cs" t="Include" />
+          </e>
+          <e p="Utils" t="Include">
+            <e p="LimitedConcurrencyLevelTaskScheduler.cs" t="Include" />
+            <e p="PitayaSimpleJson.cs" t="Include" />
+            <e p="Utils.cs" t="Include" />
+          </e>
+        </e>
+      </e>
+      <e p="NPitaya.Tests" t="IncludeRecursive">
+        <e p="bin" t="ExcludeRecursive" />
+        <e p="Metric" t="Include">
+          <e p="Prometheus.cs" t="Include" />
+          <e p="StatsDataDog.cs" t="Include" />
+        </e>
+        <e p="NPitaya.Tests.csproj" t="IncludeRecursive" />
+        <e p="obj" t="ExcludeRecursive">
+          <e p="Debug" t="Include">
+            <e p="netcoreapp2.2" t="Include">
+              <e p="NPitaya.Tests.AssemblyInfo.cs" t="Include" />
+              <e p="NPitaya.Tests.Program.cs" t="Include" />
+            </e>
+          </e>
+        </e>
+        <e p="Tests" t="Include">
+          <e p="Integration" t="Include">
+            <e p="GrpcCluster.cs" t="Include" />
+            <e p="NatsCluster.cs" t="Include" />
+          </e>
+          <e p="Models.cs" t="Include" />
+          <e p="Serializer" t="Include">
+            <e p="JSONSerializerTests.cs" t="Include" />
+            <e p="ProtobufSerializerTests.cs" t="Include" />
+          </e>
+        </e>
+      </e>
+      <e p="packages" t="ExcludeRecursive" />
+      <e p="pitaya-sharp.sln" t="IncludeFlat" />
+    </e>
+    <e p="$PROJECT_DIR$/../precompiled/libpitaya_cluster.bundle" t="Include" />
+    <e p="$PROJECT_DIR$/../precompiled/libpitaya_cluster.dylib" t="Include" />
+    <e p="$PROJECT_DIR$/../precompiled/libpitaya_cluster.so" t="Include" />
+    <e p="$USER_HOME$/Library/Caches/Rider2019.1/extResources" t="IncludeRecursive" />
+    <e p="$USER_HOME$/Library/Caches/Rider2019.1/resharper-host/local/Transient/ReSharperHost/v191/SolutionCaches/_pitaya-sharp.620454041.00" t="ExcludeRecursive" />
+    <e p="$USER_HOME$/Library/Caches/Rider2019.1/rust_expanded_macros/kRJKQtwD/expansions" t="IncludeRecursive" />
+  </component>
+</project>
