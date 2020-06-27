@@ -91,9 +91,9 @@ int main()
         &server,
         handle_rpc,
         NULL,
-        &pitaya,
         PitayaLogLevel_Trace,
-        PitayaLogKind_Console
+        PitayaLogKind_Console,
+        &pitaya
     );
 
     if (err) {

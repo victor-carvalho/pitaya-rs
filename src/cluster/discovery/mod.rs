@@ -58,11 +58,11 @@ impl ServersCache {
             .map(|old_val| {
                 warn!(
                     self.logger,
-                    "[cache] CACHE WAS STALE: updated old server"; "server" => ?old_val
+                    "cache was stale: updated old server"; "server" => ?old_val
                 );
             })
             .or_else(|| {
-                debug!(self.logger, "[cache] added"; "server" => ?server);
+                debug!(self.logger, "added server to cache"; "server" => ?server);
                 self.notify(Notification::ServerAdded(server.clone()));
                 None
             });
@@ -78,7 +78,7 @@ impl ServersCache {
 
     fn remove(&mut self, server_kind: &ServerKind, server_id: &ServerId) {
         self.servers_by_id.remove(server_id).map(|_| {
-            debug!(self.logger, "[cache] server removed"; "server_id" => &server_id.0);
+            debug!(self.logger, "server removed from cache"; "server_id" => &server_id.0);
             self.notify(Notification::ServerRemoved(server_id.clone()));
         });
         self.servers_by_kind.remove(server_kind);

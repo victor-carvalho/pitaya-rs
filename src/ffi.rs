@@ -202,9 +202,9 @@ pub extern "C" fn pitaya_initialize_with_nats(
     sv: *mut PitayaServer,
     handle_rpc_cb: PitayaHandleRpcCallback,
     handle_rpc_data: *mut c_void,
-    pitaya: *mut *mut Pitaya,
     log_level: PitayaLogLevel,
     log_kind: PitayaLogKind,
+    pitaya: *mut *mut Pitaya,
 ) -> *mut PitayaError {
     assert!(!pitaya.is_null());
     assert!(!sv.is_null());

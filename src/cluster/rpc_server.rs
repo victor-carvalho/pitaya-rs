@@ -183,7 +183,7 @@ impl NatsRpcServer {
             }
         };
 
-        info!(logger, "received msg"; "message" => %message);
+        debug!(logger, "received msg"; "message" => %message);
         Ok(())
     }
 

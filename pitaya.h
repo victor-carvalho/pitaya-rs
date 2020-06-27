@@ -75,9 +75,9 @@ PitayaError *pitaya_initialize_with_nats(PitayaNATSConfig *nc,
                                          PitayaServer *sv,
                                          PitayaHandleRpcCallback handle_rpc_cb,
                                          void *handle_rpc_data,
-                                         Pitaya **pitaya,
                                          PitayaLogLevel log_level,
-                                         PitayaLogKind log_kind);
+                                         PitayaLogKind log_kind,
+                                         Pitaya **pitaya);
 
 uint8_t *pitaya_rpc_request(PitayaRpc *rpc, int64_t *len);
 
