@@ -5,7 +5,6 @@ using PitayaSimpleJson;
 
 namespace NPitaya
 {
-
     [StructLayout(LayoutKind.Sequential)]
     public struct CRpc
     {
@@ -48,11 +47,18 @@ namespace NPitaya
 
     public enum NativeLogLevel
     {
-        Debug = 0,
-        Info = 1,
-        Warn = 2,
-        Error = 3,
-        Critical = 4,
+        Trace = 0,
+        Debug = 1,
+        Info = 2,
+        Warn = 3,
+        Error = 4,
+        Critical = 5,
+    }
+
+    public enum NativeLogKind
+    {
+        Console = 0,
+        Json = 1,
     }
 
     [StructLayout(LayoutKind.Sequential)]

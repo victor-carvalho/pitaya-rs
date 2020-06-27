@@ -7,22 +7,35 @@ namespace NPitaya
     {
         private delegate void ServerAddedOrRemoved(int serverAdded, IntPtr server, IntPtr user);
 
-        private const string LibName = "libpitaya_cpp";
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void HandleRpcCallbackFunc(IntPtr userData, IntPtr rpc);
 
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_InitializeWithNats")]
-        private static extern bool InitializeWithNatsInternal(IntPtr natsCfg, IntPtr sdCfg, IntPtr server, NativeLogLevel logLevel, string logFile);
 
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_InitializeWithGrpc")]
-        private static extern bool InitializeWithGrpcInternal(IntPtr grpcCfg, IntPtr sdCfg, IntPtr server, NativeLogLevel logLevel,  string logFile);
+        private const string LibName = "libpitaya";
 
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_Terminate")]
-        private static extern void TerminateInternal();
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "pitaya_initialize_with_nats")]
+        private static extern IntPtr InitializeWithNatsInternal(
+            IntPtr natsCfg,
+            IntPtr sdCfg,
+            IntPtr server,
+            IntPtr handleRpcCallback,
+            IntPtr handleRpcData,
+            NativeLogLevel logLevel,
+            NativeLogKind logKind,
+            out IntPtr pitaya);
 
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_GetServerById")]
-        private static extern bool GetServerByIdInternal(string serverId, ref Server retServer);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr pitaya_error_drop(IntPtr error);
 
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_FreeServer")]
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "pitaya_shutdown")]
+        private static extern void TerminateInternal(IntPtr pitaya);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "pitaya_server_by_id")]
+        private static extern bool GetServerByIdInternal(IntPtr pitaya, string serverId, string serverKind, ref Server server);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "pitaya_server_drop")]
         private static extern void FreeServerInternal(IntPtr serverPtr);
+
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_RPC")]
         private static extern unsafe bool RPCInternal(string serverId, string route, IntPtr data, int dataSize, MemoryBuffer** buffer, ref Error retErr);

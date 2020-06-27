@@ -144,6 +144,15 @@ int main()
         printf("Received response from server: %s\n", (char*)protos_response.data.arg);
     }
 
+    printf("Getting server by id...\n");
+    PitayaServer found_server;
+    int ok = pitaya_server_by_id(pitaya, "server_id", "server_kind", &found_server);
+    if (ok) {
+        printf("Server was found!\n");
+    } else {
+        printf("Server was NOT found!\n");
+    }
+
     pitaya_wait_shutdown_signal(pitaya);
 
     pitaya_shutdown(pitaya);

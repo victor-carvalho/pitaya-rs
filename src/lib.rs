@@ -130,6 +130,18 @@ impl Pitaya {
         }
     }
 
+    pub fn server_by_id(
+        &mut self,
+        server_id: &ServerId,
+        server_kind: &ServerKind,
+    ) -> Result<Option<Arc<Server>>, Error> {
+        assert!(self.service_discovery.is_some());
+        let service_discovery = self.service_discovery.as_mut().unwrap();
+
+        self.runtime
+            .block_on(async move { service_discovery.server_by_id(server_id, server_kind).await })
+    }
+
     pub fn shutdown(mut self) -> Result<(), Error> {
         let graceful_shutdown_task = self
             .graceful_shutdown_task
@@ -248,7 +260,7 @@ impl Pitaya {
                 rpc_handler,
             )));
 
-        info!(self.logger, "fnished starting pitaya server");
+        info!(self.logger, "finshed starting pitaya server");
         Ok(graceful_shutdown_receiver)
     }
 

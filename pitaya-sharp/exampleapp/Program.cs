@@ -47,40 +47,33 @@ namespace PitayaCSharpExample
           maxConnectionRetries: 3,
           maxPendingMessages: 1000);
 
-      var grpcConfig = new GrpcConfig(
-        host: "127.0.0.1",
-        port: 5444,
-        serverShutdownDeadlineMs: 2000,
-        serverMaxNumberOfRpcs: 200,
-        clientRpcTimeoutMs: 10000
-      );
-
       Dictionary<string, string> constantTags = new Dictionary<string, string>
       {
           {"game", "game"},
           {"serverType", "svType"}
       };
-      var statsdMR = new StatsdMetricsReporter("localhost", 5000, "game", constantTags);
-      MetricsReporters.AddMetricReporter(statsdMR);
-      var prometheusMR = new PrometheusMetricsReporter("default", "game", 9090);
-      MetricsReporters.AddMetricReporter(prometheusMR);
+    //   var statsdMR = new StatsdMetricsReporter("localhost", 5000, "game", constantTags);
+    //   MetricsReporters.AddMetricReporter(statsdMR);
+    //   var prometheusMR = new PrometheusMetricsReporter("default", "game", 9090);
+    //   MetricsReporters.AddMetricReporter(prometheusMR);
 
-      PitayaCluster.AddSignalHandler(() =>
-      {
-        Logger.Info("Calling terminate on cluster");
-        PitayaCluster.Terminate();
-        Logger.Info("Cluster terminated, exiting app");
-        Environment.Exit(1);
-        //Environment.FailFast("oops");
-      });
+    //   PitayaCluster.AddSignalHandler(() =>
+    //   {
+    //     Logger.Info("Calling terminate on cluster");
+    //     PitayaCluster.Terminate();
+    //     Logger.Info("Cluster terminated, exiting app");
+    //     Environment.Exit(1);
+    //     //Environment.FailFast("oops");
+    //   });
 
       try
       {
-        PitayaCluster.Initialize(
-            grpcConfig,
+          PitayaCluster.Initialize(
+            natsConfig,
             sdConfig,
             sv,
             NativeLogLevel.Debug,
+            NativeLogKind.Console,
             new PitayaCluster.ServiceDiscoveryListener((action, server) =>
             {
                 switch (action)
@@ -109,14 +102,14 @@ namespace PitayaCSharpExample
 
       Logger.Info("pitaya lib initialized successfully :)");
 
-      var tr = new TestRemote();
-      PitayaCluster.RegisterRemote(tr);
-      var th = new TestHandler();
-      PitayaCluster.RegisterHandler(th);
+    //   var tr = new TestRemote();
+    //   PitayaCluster.RegisterRemote(tr);
+    //   var th = new TestHandler();
+    //   PitayaCluster.RegisterHandler(th);
 
-      Thread.Sleep(1000);
+    //   Thread.Sleep(1000);
 
-      TrySendRpc();
+    //   TrySendRpc();
       Console.ReadKey();
       PitayaCluster.Terminate();
     }

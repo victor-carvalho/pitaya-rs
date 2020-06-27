@@ -1,4 +1,6 @@
-use crate::{protos, EtcdConfig, PitayaBuilder, RpcClientConfig, RpcServerConfig};
+use crate::{
+    protos, EtcdConfig, PitayaBuilder, RpcClientConfig, RpcServerConfig, ServerId, ServerKind,
+};
 use prost::Message;
 use slog::{error, info, o, Drain};
 use std::{
@@ -26,6 +28,26 @@ pub struct PitayaServer {
     metadata: *mut c_char,
     hostname: *mut c_char,
     frontend: i32,
+}
+
+impl PitayaServer {
+    fn copy_from(&mut self, server: &crate::Server) {
+        let metadata_str =
+            serde_json::to_string(&server.metadata).expect("metadata should be a valid hashmap");
+
+        self.id = CString::into_raw(
+            CString::new(server.id.0.as_str()).expect("string should be valid utf8"),
+        );
+        self.kind = CString::into_raw(
+            CString::new(server.kind.0.as_str()).expect("string should be valid utf8"),
+        );
+        self.metadata =
+            CString::into_raw(CString::new(metadata_str).expect("string should be valid utf8"));
+        self.hostname = CString::into_raw(
+            CString::new(server.hostname.as_str()).expect("string should be valid utf8"),
+        );
+        self.frontend = if server.frontend { 1 } else { 0 };
+    }
 }
 
 impl std::convert::TryFrom<*mut PitayaServer> for crate::Server {
@@ -138,6 +160,56 @@ pub struct Pitaya {
 }
 
 #[no_mangle]
+pub extern "C" fn pitaya_server_by_id(
+    pitaya_server: *mut Pitaya,
+    server_id: *mut c_char,
+    server_kind: *mut c_char,
+    server: *mut PitayaServer,
+) -> bool {
+    assert!(!server.is_null());
+    assert!(!pitaya_server.is_null());
+    let mut pitaya_server = unsafe { Box::from_raw(pitaya_server) };
+    let logger = pitaya_server.pitaya_server.logger.clone();
+
+    let server_id = unsafe { CStr::from_ptr(server_id) };
+    let server_kind = unsafe { CStr::from_ptr(server_kind) };
+
+    let (server_id, server_kind) = match (server_id.to_str(), server_kind.to_str()) {
+        (Ok(id), Ok(kind)) => (id, kind),
+        _ => {
+            error!(logger, "invalid utf8 parameters");
+            let _ = Box::into_raw(pitaya_server);
+            return false;
+        }
+    };
+
+    let ok = match pitaya_server
+        .pitaya_server
+        .server_by_id(&ServerId::from(server_id), &ServerKind::from(server_kind))
+    {
+        Ok(Some(sv)) => {
+            unsafe {
+                (&mut *server).copy_from(&sv);
+            }
+            true
+        }
+        Ok(None) => false,
+        Err(e) => {
+            error!(logger, "failed to get server by id"; "error" => %e);
+            false
+        }
+    };
+
+    let _ = Box::into_raw(pitaya_server);
+    ok
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_server_drop(pitaya_server: *mut PitayaServer) {
+    let _ = unsafe { Box::from_raw(pitaya_server) };
+}
+
+#[no_mangle]
 pub extern "C" fn pitaya_error_drop(error: *mut PitayaError) {
     let _ = unsafe { Box::from_raw(error) };
 }
@@ -222,28 +294,6 @@ pub extern "C" fn pitaya_initialize_with_nats(
         }
     };
 
-    // FIXME(lhahn): this is really gambeta.
-    match log_level {
-        PitayaLogLevel::Trace => {
-            std::env::set_var("RUST_LOG", "pitaya=trace");
-        }
-        PitayaLogLevel::Debug => {
-            std::env::set_var("RUST_LOG", "pitaya=debug");
-        }
-        PitayaLogLevel::Info => {
-            std::env::set_var("RUST_LOG", "pitaya=info");
-        }
-        PitayaLogLevel::Warn => {
-            std::env::set_var("RUST_LOG", "pitaya=warn");
-        }
-        PitayaLogLevel::Error => {
-            std::env::set_var("RUST_LOG", "pitaya=error");
-        }
-        PitayaLogLevel::Critical => {
-            std::env::set_var("RUST_LOG", "pitaya=critical");
-        }
-    }
-
     let root_logger = match log_kind {
         PitayaLogKind::Console => {
             let decorator = slog_term::TermDecorator::new().build();
@@ -258,6 +308,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
         ),
     };
 
+    let logger = root_logger.clone();
     let rpc_handler_logger = root_logger.new(o!());
 
     info!(root_logger, "initializing global pitaya server");
@@ -296,6 +347,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
             handle_rpc_cb(handle_rpc_data.0, rpc);
         })
         .build()
+        .map_err(|e| error!(logger, "failed to create pitaya server"; "error" => %e))
         .expect("failed to start pitaya server");
 
     unsafe {

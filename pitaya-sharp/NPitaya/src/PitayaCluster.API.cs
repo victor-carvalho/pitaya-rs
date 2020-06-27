@@ -27,6 +27,8 @@ namespace NPitaya
         private static readonly Dictionary<string, RemoteMethod> HandlersDict = new Dictionary<string, RemoteMethod>();
         private static readonly LimitedConcurrencyLevelTaskScheduler Lcts = new LimitedConcurrencyLevelTaskScheduler(ProcessorsCount);
         private static TaskFactory _rpcTaskFactory = new TaskFactory(Lcts);
+        private static IntPtr pitaya;
+        private static HandleRpcCallbackFunc handleRpcCallback;
 
         private static Action _onSignalEvent;
 
@@ -63,29 +65,6 @@ namespace NPitaya
             _onSignalEvent?.Invoke();
         }
 
-        public static void Initialize(GrpcConfig grpcCfg,
-                                      SDConfig sdCfg,
-                                      Server server,
-                                      NativeLogLevel logLevel,
-                                      ServiceDiscoveryListener serviceDiscoveryListener = null,
-                                      string logFile = "")
-        {
-            IntPtr grpcCfgPtr = new StructWrapper(grpcCfg);
-            IntPtr sdCfgPtr = new StructWrapper(sdCfg);
-            IntPtr serverPtr = new StructWrapper(server);
-
-            bool ok = InitializeWithGrpcInternal(grpcCfgPtr, sdCfgPtr, serverPtr, logLevel,
-                logFile);
-
-            if (!ok)
-            {
-                throw new PitayaException("Initialization failed");
-            }
-
-            AddServiceDiscoveryListener(serviceDiscoveryListener);
-            ListenToIncomingRPCs();
-        }
-
         private static void ListenToIncomingRPCs()
         {
             for (int i = 0; i < ProcessorsCount; i++)
@@ -110,28 +89,55 @@ namespace NPitaya
             }
         }
 
+        private static void HandleRpcCallback(IntPtr userData, IntPtr rpc)
+        {
+            Console.WriteLine("RECEIVED RPC!");
+        }
+
         public static void Initialize(NatsConfig natsCfg,
                                       SDConfig sdCfg,
                                       Server server,
                                       NativeLogLevel logLevel,
-                                      ServiceDiscoveryListener serviceDiscoveryListener = null,
-                                      string logFile = "")
+                                      NativeLogKind logKind,
+                                      ServiceDiscoveryListener serviceDiscoveryListener = null)
         {
             IntPtr natsCfgPtr = new StructWrapper(natsCfg);
             IntPtr sdCfgPtr = new StructWrapper(sdCfg);
             IntPtr serverPtr = new StructWrapper(server);
 
-            bool ok = InitializeWithNatsInternal(natsCfgPtr, sdCfgPtr, serverPtr,
-                logLevel,
-                logFile);
+            handleRpcCallback = new HandleRpcCallbackFunc(HandleRpcCallback);
 
-            if (!ok)
+            Console.WriteLine("OHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHh");
+
+            IntPtr pitaya2;
+
+            IntPtr err = InitializeWithNatsInternal(
+                natsCfgPtr,
+                sdCfgPtr,
+                serverPtr,
+                Marshal.GetFunctionPointerForDelegate(handleRpcCallback),
+                IntPtr.Zero,
+                logLevel,
+                logKind,
+                out pitaya2
+            );
+
+            if (err != IntPtr.Zero)
             {
+                // TODO(lhahn): convert error
+                pitaya_error_drop(err);
                 throw new PitayaException("Initialization failed");
             }
 
-            AddServiceDiscoveryListener(serviceDiscoveryListener);
-            ListenToIncomingRPCs();
+            pitaya = pitaya2;
+
+            if (pitaya == IntPtr.Zero)
+            {
+                Console.WriteLine("SHOULD NOT BE NULL====================");
+            }
+
+            // AddServiceDiscoveryListener(serviceDiscoveryListener);
+            // ListenToIncomingRPCs();
         }
 
         public static void RegisterRemote(BaseRemote remote)
@@ -198,24 +204,19 @@ namespace NPitaya
         public static void Terminate()
         {
             RemoveServiceDiscoveryListener(_serviceDiscoveryListener);
-            TerminateInternal();
+            TerminateInternal(pitaya);
             MetricsReporters.Terminate();
         }
 
-        public static Server? GetServerById(string serverId)
+        public static Server? GetServerById(string serverId, string serverKind)
         {
             var retServer = new Server();
-
-            bool ok = GetServerByIdInternal(serverId, ref retServer);
-
+            bool ok = GetServerByIdInternal(pitaya, serverId, serverKind, ref retServer);
             if (!ok)
             {
                 Logger.Error($"There are no servers with id {serverId}");
                 return null;
             }
-
-            //var server = (Pitaya.Server)Marshal.PtrToStructure(serverPtr, typeof(Pitaya.Server));
-            //FreeServerInternal(serverPtr);
             return retServer;
         }
 

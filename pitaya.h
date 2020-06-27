@@ -88,6 +88,13 @@ PitayaError *pitaya_send_rpc(Pitaya *pitaya_server,
                              const PitayaRpcRequest *request,
                              PitayaRpcResponse *response);
 
+bool pitaya_server_by_id(Pitaya *pitaya_server,
+                         char *server_id,
+                         char *server_kind,
+                         PitayaServer *server);
+
+void pitaya_server_drop(PitayaServer *pitaya_server);
+
 void pitaya_shutdown(Pitaya *pitaya_server);
 
 void pitaya_wait_shutdown_signal(Pitaya *pitaya_server);
