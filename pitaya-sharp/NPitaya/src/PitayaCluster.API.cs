@@ -19,14 +19,14 @@ namespace NPitaya
 {
     public partial class PitayaCluster
     {
-        private static readonly int ProcessorsCount = Environment.ProcessorCount;
+        // private static readonly int ProcessorsCount = Environment.ProcessorCount;
         private static ISerializer _serializer = new ProtobufSerializer();
         public delegate string RemoteNameFunc(string methodName);
         private delegate void OnSignalFunc();
         private static readonly Dictionary<string, RemoteMethod> RemotesDict = new Dictionary<string, RemoteMethod>();
         private static readonly Dictionary<string, RemoteMethod> HandlersDict = new Dictionary<string, RemoteMethod>();
-        private static readonly LimitedConcurrencyLevelTaskScheduler Lcts = new LimitedConcurrencyLevelTaskScheduler(ProcessorsCount);
-        private static TaskFactory _rpcTaskFactory = new TaskFactory(Lcts);
+        // private static readonly LimitedConcurrencyLevelTaskScheduler Lcts = new LimitedConcurrencyLevelTaskScheduler(ProcessorsCount);
+        // private static TaskFactory _rpcTaskFactory = new TaskFactory(Lcts);
         private static IntPtr pitaya;
         private static HandleRpcCallbackFunc handleRpcCallback;
 
@@ -65,33 +65,77 @@ namespace NPitaya
             _onSignalEvent?.Invoke();
         }
 
-        private static void ListenToIncomingRPCs()
+        private static void DispatchRpc(IntPtr rpc, Protos.Request req)
         {
-            for (int i = 0; i < ProcessorsCount; i++)
-            {
-                var threadId = i + 1;
-                new Thread(() =>
+            Task.Run(async () => {
+                var res = new Protos.Response();
+                try
                 {
-                    Logger.Debug($"[Consumer thread {threadId}] Started");
-                    for (;;)
+                    switch (req.Type)
                     {
-                        var cRpcPtr = tfg_pitc_WaitForRpc();
-                        if (cRpcPtr == IntPtr.Zero)
-                        {
-                            Logger.Debug($"[Consumer thread {threadId}] No more incoming RPCs, exiting");
+                        case RPCType.User:
+                            res = await HandleRpc(req, RPCType.User);
                             break;
-                        }
-#pragma warning disable 4014
-                        HandleIncomingRpc(cRpcPtr);
-#pragma warning restore 4014
+                        case RPCType.Sys:
+                            res = await HandleRpc(req, RPCType.Sys);
+                            break;
+                        default:
+                            throw new Exception($"invalid rpc type, argument:{req.Type}");
                     }
-                }).Start();
-            }
+                }
+                catch (Exception e)
+                {
+                    res = GetErrorResponse("PIT-500", e.Message);
+
+                    var innerMostException = e;
+                    while (innerMostException.InnerException != null)
+                        innerMostException = innerMostException.InnerException;
+
+                    Logger.Error("Exception thrown in handler: {0}", innerMostException.Message);
+#if NPITAYA_DEBUG
+                    Logger.Error("StackTrace: {0}", e.StackTrace);
+#endif
+                }
+                finally
+                {
+                    unsafe
+                    {
+                        byte[] responseData = res.ToByteArray();
+                        Int32 responseLen = responseData.Length;
+
+                        fixed (byte* p = responseData)
+                        {
+                            IntPtr err = pitaya_rpc_respond(rpc, (IntPtr)p, responseLen);
+                            if (err != IntPtr.Zero)
+                            {
+                                pitaya_error_drop(err);
+                                Logger.Error("Failed to respond to rpc");
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         private static void HandleRpcCallback(IntPtr userData, IntPtr rpc)
         {
-            Console.WriteLine("RECEIVED RPC!");
+            // var handle = GCHandle.FromIntPtr(userData);
+            // var handle.Target
+
+            Int32 len;
+            IntPtr rawData = pitaya_rpc_request(rpc, out len);
+            byte[] data = GetDataFromRawPointer(rawData, len);
+
+            try
+            {
+                var req = new Protos.Request();
+                req.MergeFrom(new CodedInputStream(data));
+                DispatchRpc(rpc, req);
+            }
+            catch (Exception e)
+            {
+                Logger.Error("Failed to decode request, error:{0}", e.Message);
+            }
         }
 
         public static void Initialize(NatsConfig natsCfg,
@@ -107,11 +151,7 @@ namespace NPitaya
 
             handleRpcCallback = new HandleRpcCallbackFunc(HandleRpcCallback);
 
-            Console.WriteLine("OHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHh");
-
-            IntPtr pitaya2;
-
-            IntPtr err = InitializeWithNatsInternal(
+            IntPtr err = pitaya_initialize_with_nats(
                 natsCfgPtr,
                 sdCfgPtr,
                 serverPtr,
@@ -119,7 +159,7 @@ namespace NPitaya
                 IntPtr.Zero,
                 logLevel,
                 logKind,
-                out pitaya2
+                out pitaya
             );
 
             if (err != IntPtr.Zero)
@@ -127,13 +167,6 @@ namespace NPitaya
                 // TODO(lhahn): convert error
                 pitaya_error_drop(err);
                 throw new PitayaException("Initialization failed");
-            }
-
-            pitaya = pitaya2;
-
-            if (pitaya == IntPtr.Zero)
-            {
-                Console.WriteLine("SHOULD NOT BE NULL====================");
             }
 
             // AddServiceDiscoveryListener(serviceDiscoveryListener);
@@ -204,14 +237,14 @@ namespace NPitaya
         public static void Terminate()
         {
             RemoveServiceDiscoveryListener(_serviceDiscoveryListener);
-            TerminateInternal(pitaya);
+            pitaya_shutdown(pitaya);
             MetricsReporters.Terminate();
         }
 
         public static Server? GetServerById(string serverId, string serverKind)
         {
             var retServer = new Server();
-            bool ok = GetServerByIdInternal(pitaya, serverId, serverKind, ref retServer);
+            bool ok = pitaya_server_by_id(pitaya, serverId, serverKind, ref retServer);
             if (!ok)
             {
                 Logger.Error($"There are no servers with id {serverId}");
@@ -223,11 +256,11 @@ namespace NPitaya
         public static unsafe Task<bool> SendPushToUser(string frontendId, string serverType, string route, string uid,
             object pushMsg)
         {
-            return _rpcTaskFactory.StartNew(() =>
+            return Task.Run(() =>
             {
-                bool ok = false;
+                IntPtr err = IntPtr.Zero;
                 MemoryBuffer inMemBuf = new MemoryBuffer();
-                MemoryBuffer* outMemBufPtr = null;
+                IntPtr outMemBufPtr = IntPtr.Zero;
                 var retError = new Error();
 
                 var push = new Push
@@ -246,10 +279,10 @@ namespace NPitaya
                         inMemBuf.size = data.Length;
                         IntPtr inMemBufPtr = new StructWrapper(inMemBuf);
 
-                        ok = PushInternal(frontendId, serverType, inMemBufPtr, &outMemBufPtr, ref retError);
-                        if (!ok) // error
+                        err = PushInternal(frontendId, serverType, inMemBufPtr, out outMemBufPtr);
+                        if (err != IntPtr.Zero) // error
                         {
-                            Logger.Error($"Push failed: ({retError.code}: {retError.msg})");
+                            // Logger.Error($"Push failed: ({retError.code}: {retError.msg})");
                             return false;
                         }
 
@@ -258,18 +291,18 @@ namespace NPitaya
                 }
                 finally
                 {
-                    if (outMemBufPtr != null) FreeMemoryBufferInternal(outMemBufPtr);
+                    // if (outMemBufPtr != null) FreeMemoryBufferInternal(outMemBufPtr);
                 }
             });
         }
 
         public static unsafe Task<bool> SendKickToUser(string frontendId, string serverType, KickMsg kick)
         {
-            return _rpcTaskFactory.StartNew(() =>
+            return Task.Run(() =>
             {
-                bool ok = false;
-                MemoryBuffer inMemBuf = new MemoryBuffer();
-                MemoryBuffer* outMemBufPtr = null;
+                IntPtr err = IntPtr.Zero;
+                IntPtr inMemBuf = IntPtr.Zero;
+                IntPtr outMemBufPtr;
                 var retError = new Error();
 
                 try
@@ -277,73 +310,81 @@ namespace NPitaya
                     var data = kick.ToByteArray();
                     fixed (byte* p = data)
                     {
-                        inMemBuf.data = (IntPtr) p;
-                        inMemBuf.size = data.Length;
-                        IntPtr inMemBufPtr = new StructWrapper(inMemBuf);
-                        ok = KickInternal(frontendId, serverType, inMemBufPtr, &outMemBufPtr, ref retError);
-                        if (!ok) // error
+                        // inMemBuf.data = (IntPtr) p;
+                        // inMemBuf.size = data.Length;
+                        // IntPtr inMemBufPtr = new StructWrapper(inMemBuf);
+                        err = KickInternal(frontendId, serverType, inMemBuf, out outMemBufPtr);
+                        if (err != IntPtr.Zero) // error
                         {
-                            Logger.Error($"Push failed: ({retError.code}: {retError.msg})");
+                            // Logger.Error($"Push failed: ({retError.code}: {retError.msg})");
                             return false;
                         }
 
                         var kickAns = new KickAnswer();
-                        kickAns.MergeFrom(new CodedInputStream(outMemBufPtr->GetData()));
+                        // kickAns.MergeFrom(new CodedInputStream(outMemBufPtr->GetData()));
 
                         return kickAns.Kicked;
                     }
                 }
                 finally
                 {
-                    if (outMemBufPtr != null) FreeMemoryBufferInternal(outMemBufPtr);
+                    // if (outMemBufPtr != null) FreeMemoryBufferInternal(outMemBufPtr);
                 }
             });
         }
 
         public static unsafe Task<T> Rpc<T>(string serverId, Route route, object msg)
         {
-            return _rpcTaskFactory.StartNew(() =>
+            return Task.Run(() =>
             {
-                MemoryBuffer* memBufPtr = null;
-                var retError = new Error();
-                var ok = false;
+                IntPtr rpcResponse;
                 Stopwatch sw = null;
+                IntPtr err = IntPtr.Zero;
                 try
                 {
                     var data = SerializerUtils.SerializeOrRaw(msg, _serializer);
+
                     sw = Stopwatch.StartNew();
                     fixed (byte* p = data)
                     {
-                        ok = RPCInternal(serverId, route.ToString(), (IntPtr) p, data.Length, &memBufPtr, ref retError);
+                        IntPtr request = pitaya_buffer_new((IntPtr)p, data.Length);
+                        err = pitaya_send_rpc(pitaya, serverId, route.ToString(), request, out rpcResponse);
+                        pitaya_buffer_drop(request);
                     }
 
                     sw.Stop();
 
-                    if (!ok) // error
+                    if (err != IntPtr.Zero) // error
                     {
-                        throw new PitayaException($"RPC call failed: ({retError.code}: {retError.msg})");
+                        // throw new PitayaException($"RPC call failed: ({retError.code}: {retError.msg})");
+                        throw new PitayaException($"RPC call failed");
                     }
 
-                    var protoRet = GetProtoMessageFromMemoryBuffer<T>(*memBufPtr);
+                    Int32 len;
+                    IntPtr resData = pitaya_buffer_data(rpcResponse, out len);
+
+                    var protoRet = GetProtoMessageFromBuffer<T>(resData, len);
+
+                    pitaya_buffer_drop(rpcResponse);
                     return protoRet;
                 }
                 finally
                 {
                     if (sw != null)
                     {
-                        if (ok)
+                        if (err == IntPtr.Zero)
                         {
                             MetricsReporters.ReportTimer(Metrics.Constants.Status.success.ToString(), route.ToString(),
                                 "rpc", "", sw);
                         }
                         else
                         {
-                            MetricsReporters.ReportTimer(Metrics.Constants.Status.fail.ToString(), route.ToString(),
-                                "rpc", $"{retError.code}", sw);
+                            // IntPtr code = pitaya_error_code(err);
+                            // MetricsReporters.ReportTimer(Metrics.Constants.Status.fail.ToString(), route.ToString(),
+                                // "rpc", $"{retError.code}", sw);
+                            pitaya_error_drop(err);
                         }
                     }
-
-                    if (memBufPtr != null) FreeMemoryBufferInternal(memBufPtr);
                 }
             });
         }

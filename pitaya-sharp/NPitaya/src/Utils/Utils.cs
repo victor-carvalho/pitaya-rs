@@ -44,9 +44,16 @@ namespace NPitaya.Utils {
             return ptr;
         }
 
-        internal static T GetProtoMessageFromMemoryBuffer<T>(MemoryBuffer rpcRes)
+        internal static byte[] GetDataFromRawPointer(IntPtr data, Int32 len)
         {
-            byte[] resData = rpcRes.GetData();
+            byte[] outData = new byte[len];
+            Marshal.Copy(data, outData, 0, len);
+            return outData;
+        }
+
+        internal static T GetProtoMessageFromBuffer<T>(IntPtr data, Int32 len)
+        {
+            byte[] resData = GetDataFromRawPointer(data, len);
             var response = new Protos.Response();
             response.MergeFrom(new CodedInputStream(resData));
             var res = (IMessage) Activator.CreateInstance(typeof(T));

@@ -36,15 +36,6 @@ namespace NPitaya
         }
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct Error
-    {
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string code;
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string msg;
-    }
-
     public enum NativeLogLevel
     {
         Trace = 0,

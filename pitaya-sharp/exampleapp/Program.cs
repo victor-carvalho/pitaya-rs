@@ -102,22 +102,24 @@ namespace PitayaCSharpExample
 
       Logger.Info("pitaya lib initialized successfully :)");
 
-    //   var tr = new TestRemote();
-    //   PitayaCluster.RegisterRemote(tr);
-    //   var th = new TestHandler();
-    //   PitayaCluster.RegisterHandler(th);
+      var tr = new TestRemote();
+      PitayaCluster.RegisterRemote(tr);
+      var th = new TestHandler();
+      PitayaCluster.RegisterHandler(th);
 
     //   Thread.Sleep(1000);
 
-    //   TrySendRpc();
+      TrySendRpc();
       Console.ReadKey();
       PitayaCluster.Terminate();
     }
+
     static async void TrySendRpc(){
+        Logger.Info("Sending RPC....");
         try
         {
-            var res = await PitayaCluster.Rpc<NPitaya.Protos.RPCRes>(Route.FromString("csharp.testRemote.remote"),
-                null);
+            var res = await PitayaCluster.Rpc<NPitaya.Protos.RPCRes>(Route.FromString("csharp.testRemote.remote"), null);
+            Console.WriteLine("GOT MESSAGE!!!");
             Console.WriteLine($"Code: {res.Code}");
             Console.WriteLine($"Msg: {res.Msg}");
         }
