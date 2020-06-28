@@ -55,7 +55,8 @@ handle_rpc(void *data, PitayaRpc *rpc)
 
     PitayaError *err = pitaya_rpc_respond(rpc, response_data, response_len);
     if (err) {
-        printf("error on respond: code=%s, message=%s\n", err->code, err->message);
+        printf("error on respond: code=%s, message=%s\n",
+                pitaya_error_code(err), pitaya_error_message(err));
         pitaya_error_drop(err);
     }
 }
@@ -97,7 +98,8 @@ int main()
     );
 
     if (err) {
-        printf("failed to initialize pitaya: code=%s, message=%s\n", err->code, err->message);
+        printf("failed to initialize pitaya: code=%s, message=%s\n",
+                pitaya_error_code(err), pitaya_error_message(err));
         pitaya_error_drop(err);
         return 1;
     }
@@ -119,15 +121,14 @@ int main()
     pb_ostream_t stream = pb_ostream_from_buffer(request_data, sizeof(request_data));
     assert(pb_encode(&stream, protos_Request_fields, &protos_request));
 
-    PitayaRpcRequest request = {0};
-    request.data = request_data;
-    request.len = stream.bytes_written;
+    PitayaBuffer *request = pitaya_buffer_new(request_data, stream.bytes_written);
+    PitayaBuffer *response = NULL;
 
-    PitayaRpcResponse response = {0};
+    err = pitaya_send_rpc(pitaya, "", "my-server-kind-from-c.room.join", request, &response);
 
-    err = pitaya_send_rpc(pitaya, "my-server-kind-from-c.room.join", &request, &response);
+    pitaya_buffer_drop(request);
     if (err) {
-        printf("ERROR ON RPC: code=%s, message=%s\n", err->code, err->message);
+        printf("ERROR ON RPC: code=%s, message=%s\n", pitaya_error_code(err), pitaya_error_message(err));
         pitaya_error_drop(err);
     } else {
         printf("RPC successful\n");
@@ -138,10 +139,14 @@ int main()
         protos_response.error.msg.funcs.decode = read_string;
         protos_response.error.metadata.funcs.decode = read_string;
 
-        pb_istream_t stream = pb_istream_from_buffer(response.data, response.len);
+        int32_t len;
+        const uint8_t *data = pitaya_buffer_data(response, &len);
+
+        pb_istream_t stream = pb_istream_from_buffer(data, len);
         assert(pb_decode(&stream, protos_Response_fields, &protos_response));
 
         printf("Received response from server: %s\n", (char*)protos_response.data.arg);
+        pitaya_buffer_drop(response);
     }
 
     printf("Getting server by id...\n");

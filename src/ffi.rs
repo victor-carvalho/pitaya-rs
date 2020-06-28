@@ -4,6 +4,7 @@ use crate::{
 use prost::Message;
 use slog::{error, info, o, Drain};
 use std::{
+    borrow::Cow,
     collections::HashMap,
     convert::TryFrom,
     ffi::{c_void, CStr, CString},
@@ -15,10 +16,23 @@ use std::{
 };
 use tokio::sync::oneshot;
 
-#[repr(C)]
 pub struct PitayaError {
-    code: *mut c_char,
-    message: *mut c_char,
+    code: String,
+    message: String,
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_error_code(err: *mut PitayaError) -> *const c_char {
+    let err = unsafe { mem::ManuallyDrop::new(Box::from_raw(err)) };
+    let code = err.code.as_ptr();
+    code as *const c_char
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_error_message(err: *mut PitayaError) -> *const c_char {
+    let err = unsafe { mem::ManuallyDrop::new(Box::from_raw(err)) };
+    let code = err.message.as_ptr();
+    code as *const c_char
 }
 
 #[repr(C)]
@@ -71,8 +85,8 @@ impl std::convert::TryFrom<*mut PitayaServer> for crate::Server {
                     hostname: hostname.to_owned(),
                 }),
                 _ => Err(Box::into_raw(Box::new(PitayaError {
-                    code: CString::into_raw(CString::new("PIT-400").unwrap()),
-                    message: CString::into_raw(CString::new("route is invalid utf8").unwrap()),
+                    code: "PIT-400".to_owned(),
+                    message: "route is invalid utf8".to_owned(),
                 }))),
             }
         }
@@ -134,16 +148,16 @@ pub struct PitayaNATSConfig {
     max_pending_msgs: i32,
 }
 
-#[repr(C)]
-pub struct PitayaRpcRequest {
-    data: *const u8,
-    len: i64,
+pub struct PitayaBuffer {
+    data: Vec<u8>,
 }
 
-#[repr(C)]
-pub struct PitayaRpcResponse {
-    data: *const u8,
-    len: i64,
+#[no_mangle]
+pub extern "C" fn pitaya_buffer_new(data: *const u8, len: i32) -> *mut PitayaBuffer {
+    let slice = unsafe { slice::from_raw_parts(data, len as usize) };
+    Box::into_raw(Box::new(PitayaBuffer {
+        data: slice.to_vec(),
+    }))
 }
 
 pub struct PitayaRpc {
@@ -215,11 +229,11 @@ pub extern "C" fn pitaya_error_drop(error: *mut PitayaError) {
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_rpc_request(rpc: *mut PitayaRpc, len: *mut i64) -> *mut u8 {
+pub extern "C" fn pitaya_rpc_request(rpc: *mut PitayaRpc, len: *mut i32) -> *mut u8 {
     assert!(!rpc.is_null());
     assert!(!len.is_null());
     unsafe {
-        *len = (*rpc).request.len() as i64;
+        *len = (*rpc).request.len() as i32;
         (*rpc).request.as_mut_ptr()
     }
 }
@@ -228,7 +242,7 @@ pub extern "C" fn pitaya_rpc_request(rpc: *mut PitayaRpc, len: *mut i64) -> *mut
 pub extern "C" fn pitaya_rpc_respond(
     rpc: *mut PitayaRpc,
     response_data: *const u8,
-    response_len: i64,
+    response_len: i32,
 ) -> *mut PitayaError {
     assert!(!rpc.is_null());
     assert!(!response_data.is_null());
@@ -241,10 +255,8 @@ pub extern "C" fn pitaya_rpc_respond(
         Ok(r) => r,
         Err(e) => {
             return Box::into_raw(Box::new(PitayaError {
-                code: CString::into_raw(CString::new("PIT-400").unwrap()),
-                message: CString::into_raw(
-                    CString::new(format!("invalid response bytes: {}", e)).unwrap(),
-                ),
+                code: "PIT-400".to_owned(),
+                message: format!("invalid response bytes: {}", e),
             }));
         }
     };
@@ -255,10 +267,15 @@ pub extern "C" fn pitaya_rpc_respond(
         std::ptr::null_mut()
     } else {
         Box::into_raw(Box::new(PitayaError {
-            code: CString::into_raw(CString::new("PIT-500").unwrap()),
-            message: CString::into_raw(CString::new("could not answer rpc").unwrap()),
+            code: "PIT-500".to_owned(),
+            message: "could not answer rpc".to_owned(),
         }))
     }
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_rpc_drop(rpc: *mut PitayaRpc) {
+    let _ = unsafe { Box::from_raw(rpc) };
 }
 
 // We are telling rust here that we know it is safe to send the
@@ -391,84 +408,104 @@ pub extern "C" fn pitaya_shutdown(pitaya_server: *mut Pitaya) {
 }
 
 #[no_mangle]
+pub extern "C" fn pitaya_buffer_data(buf: *mut PitayaBuffer, len: *mut i32) -> *const u8 {
+    assert!(!buf.is_null());
+    let pb = unsafe { Box::from_raw(buf) };
+
+    let data = pb.data.as_ptr();
+    unsafe {
+        *len = pb.data.len() as i32;
+    }
+
+    let _ = Box::into_raw(pb);
+    data
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_buffer_drop(buf: *mut PitayaBuffer) {
+    let _ = unsafe { Box::from_raw(buf) };
+}
+
+#[no_mangle]
 pub extern "C" fn pitaya_send_rpc(
     pitaya_server: *mut Pitaya,
+    server_id: *mut c_char,
     route: *mut c_char,
-    request: *const PitayaRpcRequest,
-    response: *mut PitayaRpcResponse,
+    request_buffer: *mut PitayaBuffer,
+    response_buffer: *mut *mut PitayaBuffer,
 ) -> *mut PitayaError {
-    assert!(!request.is_null());
-    assert!(!response.is_null());
+    assert!(!request_buffer.is_null());
+    assert!(!response_buffer.is_null());
     assert!(!pitaya_server.is_null());
 
-    let mut pitaya_server = unsafe { Box::from_raw(pitaya_server) };
+    let server_id = if server_id.is_null() {
+        Cow::default()
+    } else {
+        unsafe { CStr::from_ptr(server_id).to_string_lossy() }
+    };
+
+    let mut pitaya_server = unsafe { mem::ManuallyDrop::new(Box::from_raw(pitaya_server)) };
     let logger = pitaya_server.pitaya_server.logger.clone();
 
-    let route = unsafe { CStr::from_ptr(route) };
-    let request_data: &[u8] =
-        unsafe { slice::from_raw_parts((*request).data, (*request).len as usize) };
+    let route = unsafe { CStr::from_ptr(route).to_string_lossy() };
+    let request_buffer = unsafe { mem::ManuallyDrop::new(Box::from_raw(request_buffer)) };
 
-    let route: &str = match route.to_str() {
-        Ok(route) => route,
-        Err(_) => {
-            error!(logger, "route is invalid UTF8");
-            let _ = Box::into_raw(pitaya_server);
-            return Box::into_raw(Box::new(PitayaError {
-                code: CString::into_raw(CString::new("PIT-400").unwrap()),
-                message: CString::into_raw(CString::new("route is invalid utf8").unwrap()),
-            }));
-        }
+    let request = protos::Request {
+        r#type: protos::RpcType::User as i32,
+        msg: Some(protos::Msg {
+            r#type: protos::MsgType::MsgRequest as i32,
+            data: request_buffer.data.clone(),
+            route: route.as_ref().to_owned(),
+            ..protos::Msg::default()
+        }),
+        ..protos::Request::default()
     };
 
-    let request: protos::Request = match Message::decode(request_data) {
-        Ok(r) => r,
-        Err(_) => {
-            error!(logger, "could not decode request");
-            let _ = Box::into_raw(pitaya_server);
-            return Box::into_raw(Box::new(PitayaError {
-                code: CString::into_raw(CString::new("PIT-400").unwrap()),
-                message: CString::into_raw(CString::new("invalid request bytes").unwrap()),
-            }));
-        }
+    let result = if server_id.len() > 0 {
+        crate::Route::try_from(route.as_ref()).and_then(|route: crate::Route| {
+            pitaya_server.pitaya_server.send_rpc_to_server(
+                &ServerId::from(server_id.as_ref()),
+                &ServerKind::from(route.server_kind),
+                request,
+            )
+        })
+    } else {
+        pitaya_server
+            .pitaya_server
+            .send_rpc(route.as_ref(), request)
     };
 
-    let res = match pitaya_server.pitaya_server.send_rpc(route, request) {
+    let res = match result {
         Ok(r) => r,
         Err(e) => {
             error!(logger, "RPC failed");
-            let _ = Box::into_raw(pitaya_server);
             return Box::into_raw(Box::new(PitayaError {
-                code: CString::into_raw(CString::new("PIT-500").unwrap()),
-                message: CString::into_raw(CString::new(format!("rpc error: {}", e)).unwrap()),
+                code: "PIT-500".to_owned(),
+                message: format!("rpc error: {}", e),
             }));
         }
     };
 
     // We don't drop response buffer because we'll pass it to the C code.
-    let response_buffer: mem::ManuallyDrop<Vec<u8>> = {
+    let response_data: Vec<u8> = {
         let mut b = Vec::with_capacity(res.encoded_len());
         match res.encode(&mut b).map(|_| b) {
-            Ok(b) => mem::ManuallyDrop::new(b),
+            Ok(b) => b,
             Err(e) => {
                 error!(logger, "received invalid response proto!");
-                let _ = Box::into_raw(pitaya_server);
                 return Box::into_raw(Box::new(PitayaError {
-                    code: CString::into_raw(CString::new("PIT-500").unwrap()),
-                    message: CString::into_raw(
-                        CString::new(format!("invalid response proto: {}", e)).unwrap(),
-                    ),
+                    code: "PIT-500".to_owned(),
+                    message: format!("invalid response proto: {}", e),
                 }));
             }
         }
     };
 
     unsafe {
-        (*response).data = response_buffer.as_ptr();
-        (*response).len = response_buffer.len() as i64;
+        (*response_buffer) = Box::into_raw(Box::new(PitayaBuffer {
+            data: response_data,
+        }));
     }
-
-    // We don't want to deallocate the pitaya server.
-    let _ = Box::into_raw(pitaya_server);
 
     std::ptr::null_mut()
 }

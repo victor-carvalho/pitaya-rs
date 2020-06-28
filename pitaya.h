@@ -19,12 +19,11 @@ typedef enum {
 
 typedef struct Pitaya Pitaya;
 
-typedef struct PitayaRpc PitayaRpc;
+typedef struct PitayaBuffer PitayaBuffer;
 
-typedef struct {
-    char *code;
-    char *message;
-} PitayaError;
+typedef struct PitayaError PitayaError;
+
+typedef struct PitayaRpc PitayaRpc;
 
 typedef struct {
     char *addr;
@@ -58,17 +57,17 @@ typedef struct {
 
 typedef void (*PitayaHandleRpcCallback)(void*, PitayaRpc*);
 
-typedef struct {
-    const uint8_t *data;
-    int64_t len;
-} PitayaRpcRequest;
+const uint8_t *pitaya_buffer_data(PitayaBuffer *buf, int32_t *len);
 
-typedef struct {
-    const uint8_t *data;
-    int64_t len;
-} PitayaRpcResponse;
+void pitaya_buffer_drop(PitayaBuffer *buf);
+
+PitayaBuffer *pitaya_buffer_new(const uint8_t *data, int32_t len);
+
+const char *pitaya_error_code(PitayaError *err);
 
 void pitaya_error_drop(PitayaError *error);
+
+const char *pitaya_error_message(PitayaError *err);
 
 PitayaError *pitaya_initialize_with_nats(PitayaNATSConfig *nc,
                                          PitayaSDConfig *sd_config,
@@ -79,14 +78,17 @@ PitayaError *pitaya_initialize_with_nats(PitayaNATSConfig *nc,
                                          PitayaLogKind log_kind,
                                          Pitaya **pitaya);
 
-uint8_t *pitaya_rpc_request(PitayaRpc *rpc, int64_t *len);
+void pitaya_rpc_drop(PitayaRpc *rpc);
 
-PitayaError *pitaya_rpc_respond(PitayaRpc *rpc, const uint8_t *response_data, int64_t response_len);
+uint8_t *pitaya_rpc_request(PitayaRpc *rpc, int32_t *len);
+
+PitayaError *pitaya_rpc_respond(PitayaRpc *rpc, const uint8_t *response_data, int32_t response_len);
 
 PitayaError *pitaya_send_rpc(Pitaya *pitaya_server,
+                             char *server_id,
                              char *route,
-                             const PitayaRpcRequest *request,
-                             PitayaRpcResponse *response);
+                             PitayaBuffer *request_buffer,
+                             PitayaBuffer **response_buffer);
 
 bool pitaya_server_by_id(Pitaya *pitaya_server,
                          char *server_id,

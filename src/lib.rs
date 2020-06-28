@@ -176,6 +176,40 @@ impl Pitaya {
         Ok(())
     }
 
+    pub fn send_rpc_to_server(
+        &mut self,
+        server_id: &ServerId,
+        server_kind: &ServerKind,
+        req: protos::Request,
+    ) -> Result<protos::Response, Error> {
+        use cluster::discovery::EtcdLazy;
+
+        debug!(self.logger, "sending rpc");
+
+        debug!(self.logger, "getting servers");
+        let server = if let Some(ref mut service_discovery) = self.service_discovery {
+            async fn get_server_by_id(
+                etcd: &mut EtcdLazy,
+                server_id: &ServerId,
+                server_kind: &ServerKind,
+            ) -> Result<Option<Arc<Server>>, Error> {
+                let server = etcd.server_by_id(server_id, server_kind).await?;
+                Ok(server)
+            }
+            self.runtime
+                .block_on(get_server_by_id(service_discovery, server_id, server_kind))?
+        } else {
+            panic!("etcd should be initialized");
+        };
+
+        if let Some(server) = server {
+            debug!(self.logger, "sending rpc");
+            self.nats_rpc_client.call(server, req)
+        } else {
+            Err(Error::NoServersFound(server_kind.clone()))
+        }
+    }
+
     pub fn send_rpc(
         &mut self,
         route: &str,
