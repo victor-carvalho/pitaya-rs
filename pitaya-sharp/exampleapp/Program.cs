@@ -107,14 +107,13 @@ namespace PitayaCSharpExample
       var th = new TestHandler();
       PitayaCluster.RegisterHandler(th);
 
-    //   Thread.Sleep(1000);
-
       TrySendRpc();
       Console.ReadKey();
       PitayaCluster.Terminate();
     }
 
-    static async void TrySendRpc(){
+    static async void TrySendRpc()
+    {
         Logger.Info("Sending RPC....");
         try
         {
