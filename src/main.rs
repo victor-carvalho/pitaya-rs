@@ -16,7 +16,6 @@ fn init_logger() -> slog::Logger {
 
 fn main() {
     let root_logger = init_logger();
-    let rpc_handler_logger = root_logger.clone();
     let logger = root_logger.clone();
 
     let (mut pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
@@ -30,18 +29,28 @@ fn main() {
             prefix: String::from("pitaya"),
             ..pitaya::EtcdConfig::default()
         })
-        .with_rpc_handler(move |mut rpc| {
-            info!(
-                rpc_handler_logger,
-                "!!!!!!!! received rpc req: {:?}",
-                rpc.request()
-            );
-            let res = pitaya::protos::Response {
-                data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
-                error: None,
-            };
-            if !rpc.respond(res) {
-                error!(rpc_handler_logger, "failed to respond to the server");
+        .with_rpc_handler({
+            let logger = logger.clone();
+            move |mut rpc| {
+                info!(logger, "!!!!!!!! received rpc req: {:?}", rpc.request());
+                let res = pitaya::protos::Response {
+                    data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
+                    error: None,
+                };
+                if !rpc.respond(res) {
+                    error!(logger, "failed to respond to the server");
+                }
+            }
+        })
+        .with_cluster_subscriber({
+            let logger = logger.clone();
+            move |notification| match notification {
+                pitaya::cluster::Notification::ServerAdded(server) => {
+                    info!(logger, "[subscriber] server added"; "server" => ?server);
+                }
+                pitaya::cluster::Notification::ServerRemoved(server_id) => {
+                    info!(logger, "[subscriber] server removed"; "server_id" => ?server_id);
+                }
             }
         })
         .build()

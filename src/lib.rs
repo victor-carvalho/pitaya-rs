@@ -12,7 +12,7 @@ extern crate slog_term;
 extern crate tokio;
 extern crate uuid;
 
-mod cluster;
+pub mod cluster;
 mod error;
 mod ffi;
 mod server;
@@ -32,7 +32,7 @@ use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc, time};
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{broadcast, mpsc, oneshot},
     task,
 };
 
@@ -68,8 +68,7 @@ impl<'a> std::convert::TryFrom<&'a str> for Route<'a> {
 // Currently, it only implements cluster mode.
 pub struct Pitaya {
     this_server: Arc<Server>,
-    etcd_config: cluster::discovery::EtcdConfig,
-    service_discovery: Option<cluster::discovery::EtcdLazy>,
+    service_discovery: cluster::discovery::EtcdLazy,
     nats_rpc_client: cluster::rpc_client::NatsClient,
     nats_rpc_server: cluster::rpc_server::NatsRpcServer,
     runtime: tokio::runtime::Runtime,
@@ -88,7 +87,7 @@ impl Pitaya {
         rpc_client_config: cluster::rpc_client::Config,
         rpc_server_config: cluster::rpc_server::Config,
         shutdown_timeout: time::Duration,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let server_id = uuid::Uuid::new_v4().to_string();
         let this_server = Arc::new(Server {
             id: ServerId(server_id),
@@ -102,7 +101,7 @@ impl Pitaya {
         debug!(logger, "this server: {:?}", this_server);
 
         // TODO(lhahn): let user parameterize this runtime.
-        let rt = tokio::runtime::Runtime::new()
+        let mut rt = tokio::runtime::Runtime::new()
             .map_err(|e| Error::Tokio(e))
             .expect("failed to create tokio runtime");
 
@@ -115,11 +114,15 @@ impl Pitaya {
             this_server.clone(),
             rpc_server_config,
         );
+        let service_discovery = rt.block_on({
+            let logger = logger.new(o!("module" => "service_discovery"));
+            let server = this_server.clone();
+            async move { cluster::discovery::EtcdLazy::new(logger, server, etcd_config).await }
+        })?;
 
-        Self {
+        Ok(Self {
             this_server: this_server,
-            etcd_config: etcd_config,
-            service_discovery: None,
+            service_discovery: service_discovery,
             nats_rpc_client: client,
             nats_rpc_server: server,
             runtime: rt,
@@ -127,7 +130,7 @@ impl Pitaya {
             listen_for_rpc_task: None,
             graceful_shutdown_task: None,
             logger: logger,
-        }
+        })
     }
 
     pub fn server_by_id(
@@ -135,9 +138,7 @@ impl Pitaya {
         server_id: &ServerId,
         server_kind: &ServerKind,
     ) -> Result<Option<Arc<Server>>, Error> {
-        assert!(self.service_discovery.is_some());
-        let service_discovery = self.service_discovery.as_mut().unwrap();
-
+        let service_discovery = &mut self.service_discovery;
         self.runtime
             .block_on(async move { service_discovery.server_by_id(server_id, server_kind).await })
     }
@@ -147,10 +148,6 @@ impl Pitaya {
             .graceful_shutdown_task
             .take()
             .expect("graceful shutdown task should've been created");
-        let mut service_discovery = self
-            .service_discovery
-            .take()
-            .expect("service discovery should've been created");
         let listen_for_rpc_task = self
             .listen_for_rpc_task
             .take()
@@ -161,8 +158,10 @@ impl Pitaya {
         self.nats_rpc_server.stop()?;
         self.runtime
             .block_on(async move { listen_for_rpc_task.await })?;
-        self.runtime
-            .block_on(async move { service_discovery.stop().await })?;
+        self.runtime.block_on({
+            let service_discovery = &mut self.service_discovery;
+            async move { service_discovery.stop().await }
+        })?;
         self.runtime
             .block_on(async move { graceful_shutdown_task.await })?;
 
@@ -187,7 +186,7 @@ impl Pitaya {
         debug!(self.logger, "sending rpc");
 
         debug!(self.logger, "getting servers");
-        let server = if let Some(ref mut service_discovery) = self.service_discovery {
+        let server = {
             async fn get_server_by_id(
                 etcd: &mut EtcdLazy,
                 server_id: &ServerId,
@@ -196,10 +195,11 @@ impl Pitaya {
                 let server = etcd.server_by_id(server_id, server_kind).await?;
                 Ok(server)
             }
-            self.runtime
-                .block_on(get_server_by_id(service_discovery, server_id, server_kind))?
-        } else {
-            panic!("etcd should be initialized");
+            self.runtime.block_on(get_server_by_id(
+                &mut self.service_discovery,
+                server_id,
+                server_kind,
+            ))?
         };
 
         if let Some(server) = server {
@@ -226,7 +226,7 @@ impl Pitaya {
         let server_kind = ServerKind::from(route.server_kind);
 
         debug!(self.logger, "getting servers");
-        let servers = if let Some(ref mut service_discovery) = self.service_discovery {
+        let servers = {
             async fn get_servers(
                 etcd: &mut EtcdLazy,
                 server_kind: &ServerKind,
@@ -235,9 +235,7 @@ impl Pitaya {
                 Ok(servers)
             }
             self.runtime
-                .block_on(get_servers(service_discovery, &server_kind))?
-        } else {
-            panic!("etcd should be initialized");
+                .block_on(get_servers(&mut self.service_discovery, &server_kind))?
         };
 
         debug!(self.logger, "getting random server");
@@ -258,16 +256,6 @@ impl Pitaya {
         RpcHandler: FnMut(cluster::Rpc) + Send + 'static,
     {
         info!(self.logger, "starting pitaya server");
-        async fn start_etcd(
-            logger: slog::Logger,
-            server: Arc<Server>,
-            config: EtcdConfig,
-            app_die_sender: mpsc::Sender<()>,
-        ) -> Result<cluster::discovery::EtcdLazy, Error> {
-            let mut sd = cluster::discovery::EtcdLazy::new(logger, server, config).await?;
-            sd.start(app_die_sender).await?;
-            Ok(sd)
-        }
 
         let (graceful_shutdown_sender, graceful_shutdown_receiver) = oneshot::channel();
         // NOTE(lhahn): I don't expect that we'll attemp to send more than 20 die messages.
@@ -280,16 +268,11 @@ impl Pitaya {
                 app_die_receiver,
             )));
 
-        self.service_discovery.replace({
-            let server = self.this_server.clone();
-            let config = self.etcd_config.clone();
-            self.runtime.block_on(start_etcd(
-                self.logger.new(o!("module" => "service_discovery")),
-                server,
-                config,
-                app_die_sender,
-            ))
-        }?);
+        self.runtime.block_on({
+            let service_discovery = &mut self.service_discovery;
+            async move { service_discovery.start(app_die_sender).await }
+        })?;
+
         self.nats_rpc_client.connect()?;
 
         let nats_rpc_server_connection = self.nats_rpc_server.start()?;
@@ -370,6 +353,33 @@ impl Pitaya {
             }
         }
     }
+
+    pub fn add_cluster_subscriber(
+        &mut self,
+        mut subscriber: Box<dyn FnMut(cluster::Notification) + Send + 'static>,
+    ) {
+        let logger = self.logger.new(o!());
+        let mut subscription = self.service_discovery.subscribe();
+
+        self.runtime.spawn(async move {
+            loop {
+                match subscription.recv().await {
+                    Ok(n) => {
+                        subscriber(n);
+                    }
+                    Err(broadcast::RecvError::Lagged(num_skipped_msgs)) => {
+                        // This should not happen. The only case where this might be an issue is if the
+                        // callback is doing some heavy processing for some reason.
+                        warn!(logger, "cluster subscriber lagged behind!"; "num_messages" => num_skipped_msgs);
+                    }
+                    Err(broadcast::RecvError::Closed) => {
+                        debug!(logger, "cluster subscriber channel closed");
+                        return;
+                    }
+                }
+            }
+        });
+    }
 }
 
 pub struct PitayaBuilder<RpcHandler> {
@@ -381,6 +391,7 @@ pub struct PitayaBuilder<RpcHandler> {
     shutdown_timeout: time::Duration,
     rpc_handler: Option<RpcHandler>,
     logger: Option<slog::Logger>,
+    cluster_subscriber: Option<Box<dyn FnMut(cluster::Notification) + Send + 'static>>,
 }
 
 impl<RpcHandler> PitayaBuilder<RpcHandler>
@@ -397,6 +408,7 @@ where
             shutdown_timeout: time::Duration::from_secs(10),
             rpc_handler: None,
             logger: None,
+            cluster_subscriber: None,
         }
     }
 
@@ -440,6 +452,14 @@ where
         self
     }
 
+    pub fn with_cluster_subscriber<F>(mut self, subscriber: F) -> Self
+    where
+        F: FnMut(cluster::Notification) + Send + 'static,
+    {
+        self.cluster_subscriber.replace(Box::new(subscriber));
+        self
+    }
+
     pub fn build(self) -> Result<(Pitaya, oneshot::Receiver<()>), Error> {
         let mut p = Pitaya::new(
             self.logger
@@ -451,7 +471,10 @@ where
             self.rpc_client_config,
             self.rpc_server_config,
             self.shutdown_timeout,
-        );
+        )?;
+        if let Some(subscriber) = self.cluster_subscriber {
+            p.add_cluster_subscriber(subscriber);
+        }
         let shutdown_receiver =
             p.start(self.rpc_handler.expect("you should defined a rpc handler!"))?;
         Ok((p, shutdown_receiver))

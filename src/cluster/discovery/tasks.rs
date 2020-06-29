@@ -142,7 +142,7 @@ pub(super) async fn watch_task(
             }
             Err(e) => {
                 // TODO(lhahn): should we send an event to kill the pod here?
-                error!(logger, "failed to get watch message: {}", e);
+                panic!("failed to get watch message: {}", e);
             }
         }
     }

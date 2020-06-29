@@ -17,6 +17,8 @@ typedef enum {
     PitayaLogLevel_Critical = 5,
 } PitayaLogLevel;
 
+typedef struct Notification Notification;
+
 typedef struct Pitaya Pitaya;
 
 typedef struct PitayaBuffer PitayaBuffer;
@@ -57,6 +59,10 @@ typedef struct {
 
 typedef void (*PitayaHandleRpcCallback)(void*, PitayaRpc*);
 
+typedef Notification ClusterNotification;
+
+typedef void (*ClusterNotificationCallback)(void*, ClusterNotification);
+
 const uint8_t *pitaya_buffer_data(PitayaBuffer *buf, int32_t *len);
 
 void pitaya_buffer_drop(PitayaBuffer *buf);
@@ -76,6 +82,8 @@ PitayaError *pitaya_initialize_with_nats(PitayaNATSConfig *nc,
                                          void *handle_rpc_data,
                                          PitayaLogLevel log_level,
                                          PitayaLogKind log_kind,
+                                         ClusterNotificationCallback cluster_notification_callback,
+                                         void *cluster_notification_data,
                                          Pitaya **pitaya);
 
 void pitaya_rpc_drop(PitayaRpc *rpc);

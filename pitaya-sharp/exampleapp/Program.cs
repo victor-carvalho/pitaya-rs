@@ -47,11 +47,12 @@ namespace PitayaCSharpExample
           maxConnectionRetries: 3,
           maxPendingMessages: 1000);
 
-      Dictionary<string, string> constantTags = new Dictionary<string, string>
+      var constantTags = new Dictionary<string, string>
       {
           {"game", "game"},
           {"serverType", "svType"}
       };
+
     //   var statsdMR = new StatsdMetricsReporter("localhost", 5000, "game", constantTags);
     //   MetricsReporters.AddMetricReporter(statsdMR);
     //   var prometheusMR = new PrometheusMetricsReporter("default", "game", 9090);

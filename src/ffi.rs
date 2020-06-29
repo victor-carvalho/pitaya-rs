@@ -165,8 +165,13 @@ pub struct PitayaRpc {
     responder: oneshot::Sender<protos::Response>,
 }
 
+pub type ClusterNotification = crate::cluster::Notification;
+
+pub type ClusterNotificationCallback = extern "C" fn(*mut c_void, ClusterNotification);
+
 pub type PitayaHandleRpcCallback = extern "C" fn(*mut c_void, *mut PitayaRpc);
-pub struct PitayaHandleRpcData(*mut c_void);
+
+struct PitayaUserData(*mut c_void);
 
 pub struct Pitaya {
     pitaya_server: crate::Pitaya,
@@ -282,7 +287,7 @@ pub extern "C" fn pitaya_rpc_drop(rpc: *mut PitayaRpc) {
 // HandleRpcData to another thread. In reality, this is a void* provided
 // by the user, so it could definitely crash the program depending on how the value
 // is used outside of the rust code.
-unsafe impl Send for PitayaHandleRpcData {}
+unsafe impl Send for PitayaUserData {}
 
 #[no_mangle]
 pub extern "C" fn pitaya_initialize_with_nats(
@@ -293,6 +298,8 @@ pub extern "C" fn pitaya_initialize_with_nats(
     handle_rpc_data: *mut c_void,
     log_level: PitayaLogLevel,
     log_kind: PitayaLogKind,
+    cluster_notification_callback: ClusterNotificationCallback,
+    cluster_notification_data: *mut c_void,
     pitaya: *mut *mut Pitaya,
 ) -> *mut PitayaError {
     assert!(!pitaya.is_null());
@@ -302,7 +309,8 @@ pub extern "C" fn pitaya_initialize_with_nats(
 
     // This wrapper type is necessary in order to send it to
     // another thread.
-    let handle_rpc_data = PitayaHandleRpcData(handle_rpc_data);
+    let handle_rpc_data = PitayaUserData(handle_rpc_data);
+    let cluster_notification_data = PitayaUserData(cluster_notification_data);
 
     let server = match crate::Server::try_from(sv) {
         Ok(sv) => sv,
