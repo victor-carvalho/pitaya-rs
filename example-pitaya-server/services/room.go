@@ -66,15 +66,15 @@ func (r *Room) AfterInit() {
 	})
 }
 
-func reply(code int32, msg string) *protos.Response {
-	return &protos.Response{
+func reply(code int32, msg string) *protos.MyResponse {
+	return &protos.MyResponse{
 		Code: code,
 		Msg:  msg,
 	}
 }
 
 // Entry is the entrypoint
-func (r *Room) Entry(ctx context.Context) (*protos.Response, error) {
+func (r *Room) Entry(ctx context.Context) (*protos.MyResponse, error) {
 	fakeUID := uuid.New().String() // just use s.ID as uid !!!
 	s := pitaya.GetSessionFromCtx(ctx)
 	err := s.Bind(ctx, fakeUID) // binding session uid
@@ -85,7 +85,7 @@ func (r *Room) Entry(ctx context.Context) (*protos.Response, error) {
 }
 
 // Join room
-func (r *Room) Join(ctx context.Context) (*protos.Response, error) {
+func (r *Room) Join(ctx context.Context) (*protos.MyResponse, error) {
 	//s := pitaya.GetSessionFromCtx(ctx)
 	//members, err := pitaya.GroupMembers(ctx, "room")
 	//if err != nil {
@@ -97,7 +97,7 @@ func (r *Room) Join(ctx context.Context) (*protos.Response, error) {
 	//s.OnClose(func() {
 	//	pitaya.GroupRemoveMember(ctx, "room", s.UID())
 	//})
-	return &protos.Response{Msg: "success"}, nil
+	return &protos.MyResponse{Msg: "success"}, nil
 }
 
 // Message sync last message to all members
@@ -109,8 +109,8 @@ func (r *Room) Message(ctx context.Context, msg *protos.UserMessage) {
 }
 
 // SendRPC sends rpc
-func (r *Room) SendRPC(ctx context.Context, msg []byte) (*protos.Response, error) {
-	ret := protos.Response{}
+func (r *Room) SendRPC(ctx context.Context, msg []byte) (*protos.MyResponse, error) {
+	ret := protos.MyResponse{}
 	err := pitaya.RPC(ctx, "connector.connectorremote.remotefunc", &ret, &protos.RPCMsg{})
 	if err != nil {
 		return nil, pitaya.Error(err, "RPC-000")

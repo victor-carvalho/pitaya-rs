@@ -10,11 +10,11 @@ namespace exampleapp.Handlers
 {
     class TestHandler : BaseHandler
     {
-        public async Task<RPCRes> Entry(PitayaSession pitayaSession, RPCMsg msg)
+        public async Task<MyResponse> Entry(PitayaSession pitayaSession, RPCMsg msg)
         {
-            var response = new NPitaya.Protos.RPCRes
+            var response = new MyResponse
             {
-                Msg = $"hello from csharp handler!!! :) {Guid.NewGuid().ToString()}",
+                Msg = $"hello from csharp handler!!! :) {Guid.NewGuid().ToString()}, route={msg.Route} msg={msg.Msg}",
                 Code = 200
             };
             return response;
@@ -22,7 +22,7 @@ namespace exampleapp.Handlers
 
         public async Task NotifyBind(PitayaSession pitayaSession, RPCMsg msg)
         {
-            var response = new NPitaya.Protos.RPCRes
+            var response = new MyResponse
             {
                 Msg = $"hello from csharp handler!!! :) {Guid.NewGuid().ToString()}",
                 Code = 200
@@ -46,7 +46,7 @@ namespace exampleapp.Handlers
         {
             Console.WriteLine("got empty notify");
             var msg = Encoding.UTF8.GetBytes("test felipe");
-            var ok = await pitayaSession.Push(new RPCRes{Code = 200, Msg = "testFelipe"}, "test.route");
+            var ok = await pitayaSession.Push(new MyResponse{Code = 200, Msg = "testFelipe"}, "test.route");
             if (!ok)
             {
                 Logger.Error("push to user failed!");

@@ -28,7 +28,7 @@ pub use cluster::{
 };
 pub use error::Error;
 use server::{Server, ServerId, ServerKind};
-use slog::{debug, error, info, o, warn};
+use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc, time};
 use tokio::{
@@ -204,7 +204,10 @@ impl Pitaya {
 
         if let Some(server) = server {
             debug!(self.logger, "sending rpc");
-            self.nats_rpc_client.call(server, req)
+            self.nats_rpc_client.call(server, req).map(|res| {
+                trace!(self.logger, "received rpc response"; "res" => ?res);
+                res
+            })
         } else {
             Err(Error::NoServersFound(server_kind.clone()))
         }
@@ -240,7 +243,10 @@ impl Pitaya {
         debug!(self.logger, "getting random server");
         if let Some(random_server) = utils::random_server(&servers) {
             debug!(self.logger, "sending rpc");
-            self.nats_rpc_client.call(random_server, req)
+            self.nats_rpc_client.call(random_server, req).map(|res| {
+                trace!(self.logger, "received rpc response"; "res" => ?res);
+                res
+            })
         } else {
             error!(self.logger, "found no servers for kind"; "kind" => &server_kind.0);
             Err(Error::NoServersFound(server_kind))

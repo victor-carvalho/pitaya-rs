@@ -338,54 +338,28 @@ namespace NPitaya
             return Task.Run(() =>
             {
                 IntPtr rpcResponse;
-                Stopwatch sw = null;
                 IntPtr err = IntPtr.Zero;
-                try
+
+                var data = SerializerUtils.SerializeOrRaw(msg, _serializer);
+                fixed (byte* p = data)
                 {
-                    var data = SerializerUtils.SerializeOrRaw(msg, _serializer);
-
-                    sw = Stopwatch.StartNew();
-                    fixed (byte* p = data)
-                    {
-                        IntPtr request = pitaya_buffer_new((IntPtr)p, data.Length);
-                        err = pitaya_send_rpc(pitaya, serverId, route.ToString(), request, out rpcResponse);
-                        pitaya_buffer_drop(request);
-                    }
-
-                    sw.Stop();
-
-                    if (err != IntPtr.Zero) // error
-                    {
-                        // throw new PitayaException($"RPC call failed: ({retError.code}: {retError.msg})");
-                        throw new PitayaException($"RPC call failed");
-                    }
-
-                    Int32 len;
-                    IntPtr resData = pitaya_buffer_data(rpcResponse, out len);
-
-                    var protoRet = GetProtoMessageFromBuffer<T>(resData, len);
-
-                    pitaya_buffer_drop(rpcResponse);
-                    return protoRet;
+                    IntPtr request = pitaya_buffer_new((IntPtr)p, data.Length);
+                    err = pitaya_send_rpc(pitaya, serverId, route.ToString(), request, out rpcResponse);
+                    pitaya_buffer_drop(request);
                 }
-                finally
+
+                if (err != IntPtr.Zero) // error
                 {
-                    if (sw != null)
-                    {
-                        if (err == IntPtr.Zero)
-                        {
-                            MetricsReporters.ReportTimer(Metrics.Constants.Status.success.ToString(), route.ToString(),
-                                "rpc", "", sw);
-                        }
-                        else
-                        {
-                            // IntPtr code = pitaya_error_code(err);
-                            // MetricsReporters.ReportTimer(Metrics.Constants.Status.fail.ToString(), route.ToString(),
-                                // "rpc", $"{retError.code}", sw);
-                            pitaya_error_drop(err);
-                        }
-                    }
+                    // throw new PitayaException($"RPC call failed: ({retError.code}: {retError.msg})");
+                    pitaya_error_drop(err);
+                    throw new PitayaException($"RPC call failed");
                 }
+
+                Int32 len;
+                IntPtr resData = pitaya_buffer_data(rpcResponse, out len);
+                T response = GetProtoMessageFromBuffer<T>(resData, len);
+                pitaya_buffer_drop(rpcResponse);
+                return response;
             });
         }
 

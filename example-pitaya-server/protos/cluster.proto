@@ -2,8 +2,10 @@ syntax = "proto3";
 
 package protos;
 
+option csharp_namespace = "NPitaya.Protos";
+
 // Response represents a rpc message
-message Response {
+message MyResponse {
   int32 Code = 1;
   string Msg = 2;
 }

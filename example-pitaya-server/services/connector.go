@@ -24,9 +24,9 @@ type SessionData struct {
 }
 
 // RemoteFunc is a function that will be called remotelly
-func (c *ConnectorRemote) RemoteFunc(ctx context.Context, message []byte) (*protos.Response, error) {
+func (c *ConnectorRemote) RemoteFunc(ctx context.Context, message []byte) (*protos.MyResponse, error) {
 	fmt.Printf("received a remote call with this message: %s\n", message)
-	return &protos.Response{
+	return &protos.MyResponse{
 		Msg: string(message),
 	}, nil
 }
