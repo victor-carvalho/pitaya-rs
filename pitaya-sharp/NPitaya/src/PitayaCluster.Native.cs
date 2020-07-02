@@ -10,6 +10,9 @@ namespace NPitaya
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void HandleRpcCallbackFunc(IntPtr userData, IntPtr rpc);
 
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void ClusterNotificationCallbackFunc(IntPtr userData, NotificationType notificationType, IntPtr data);
+
 
         private const string LibName = "libpitaya";
 
@@ -25,6 +28,8 @@ namespace NPitaya
             IntPtr handleRpcData,
             NativeLogLevel logLevel,
             NativeLogKind logKind,
+            IntPtr clusterNotificationCallback,
+            IntPtr clusterNotificationData,
             out IntPtr pitaya);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern void pitaya_shutdown(IntPtr pitaya);

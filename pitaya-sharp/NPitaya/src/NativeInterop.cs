@@ -5,6 +5,12 @@ using PitayaSimpleJson;
 
 namespace NPitaya
 {
+    public enum NotificationType
+    {
+        ServerAdded = 0,
+        ServerRemoved = 1,
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct CRpc
     {

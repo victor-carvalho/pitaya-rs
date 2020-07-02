@@ -4,3 +4,4 @@ main
 *.pid
 *.log
 .ccls-cache
+.vscode

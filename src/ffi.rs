@@ -1,5 +1,6 @@
 use crate::{
-    protos, EtcdConfig, PitayaBuilder, RpcClientConfig, RpcServerConfig, ServerId, ServerKind,
+    cluster, protos, EtcdConfig, PitayaBuilder, RpcClientConfig, RpcServerConfig, ServerId,
+    ServerKind,
 };
 use prost::Message;
 use slog::{error, info, o, Drain};
@@ -11,7 +12,7 @@ use std::{
     mem,
     os::raw::c_char,
     slice,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time,
 };
 use tokio::sync::oneshot;
@@ -165,9 +166,15 @@ pub struct PitayaRpc {
     responder: oneshot::Sender<protos::Response>,
 }
 
-pub type ClusterNotification = crate::cluster::Notification;
+#[repr(C)]
+#[allow(dead_code)]
+pub enum PitayaClusterNotification {
+    ServerAdded = 0,
+    ServerRemoved = 1,
+}
 
-pub type ClusterNotificationCallback = extern "C" fn(*mut c_void, ClusterNotification);
+pub type PitayaClusterNotificationCallback =
+    extern "C" fn(*mut c_void, PitayaClusterNotification, *mut c_void);
 
 pub type PitayaHandleRpcCallback = extern "C" fn(*mut c_void, *mut PitayaRpc);
 
@@ -284,10 +291,11 @@ pub extern "C" fn pitaya_rpc_drop(rpc: *mut PitayaRpc) {
 }
 
 // We are telling rust here that we know it is safe to send the
-// HandleRpcData to another thread. In reality, this is a void* provided
-// by the user, so it could definitely crash the program depending on how the value
-// is used outside of the rust code.
+// PitayaUserData to another thread and use it in multiple threads.
+// In reality, this is a void* provided by the user, so it could definitely
+// crash the program depending on how the value is used outside of the rust code.
 unsafe impl Send for PitayaUserData {}
+unsafe impl Sync for PitayaUserData {}
 
 #[no_mangle]
 pub extern "C" fn pitaya_initialize_with_nats(
@@ -298,7 +306,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
     handle_rpc_data: *mut c_void,
     log_level: PitayaLogLevel,
     log_kind: PitayaLogKind,
-    cluster_notification_callback: ClusterNotificationCallback,
+    cluster_notification_callback: PitayaClusterNotificationCallback,
     cluster_notification_data: *mut c_void,
     pitaya: *mut *mut Pitaya,
 ) -> *mut PitayaError {
@@ -338,7 +346,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
 
     info!(root_logger, "initializing global pitaya server");
 
-    let (pitaya_server, shutdown_receiver) = PitayaBuilder::new()
+    let res = PitayaBuilder::new()
         .with_server_kind(&server.kind.0)
         .with_logger(root_logger)
         .with_rpc_client_config(RpcClientConfig {
@@ -371,18 +379,51 @@ pub extern "C" fn pitaya_initialize_with_nats(
             }));
             handle_rpc_cb(handle_rpc_data.0, rpc);
         })
-        .build()
-        .map_err(|e| error!(logger, "failed to create pitaya server"; "error" => %e))
-        .expect("failed to start pitaya server");
+        .with_cluster_subscriber({
+            let logger = logger.clone();
+            move |notification| match notification {
+                cluster::Notification::ServerAdded(server) => {
+                    let raw_server = Arc::into_raw(server);
+                    cluster_notification_callback(
+                        cluster_notification_data.0,
+                        PitayaClusterNotification::ServerAdded,
+                        raw_server as *mut c_void,
+                    );
+                    let _ = unsafe { Arc::from_raw(raw_server) };
+                }
+                cluster::Notification::ServerRemoved(server_id) => {
+                    let _ = CString::new(server_id.0.as_str())
+                        .map(|server_id| {
+                            cluster_notification_callback(
+                                cluster_notification_data.0,
+                                PitayaClusterNotification::ServerRemoved,
+                                server_id.as_ptr() as *mut c_void,
+                            );
+                        })
+                        .map_err(|_| {
+                            error!(logger, "failed to convert server id to raw c string");
+                        });
+                }
+            }
+        })
+        .build();
 
-    unsafe {
-        (*pitaya) = Box::into_raw(Box::new(Pitaya {
-            pitaya_server: pitaya_server,
-            shutdown_receiver: Some(shutdown_receiver),
-        }));
+    match res {
+        Ok((pitaya_server, shutdown_receiver)) => unsafe {
+            (*pitaya) = Box::into_raw(Box::new(Pitaya {
+                pitaya_server,
+                shutdown_receiver: Some(shutdown_receiver),
+            }));
+            std::ptr::null_mut()
+        },
+        Err(e) => {
+            error!(logger, "failed to create pitaya server"; "error" => %e);
+            Box::into_raw(Box::new(PitayaError {
+                code: "PIT-500".to_owned(),
+                message: format!("failed to create pitaya server: {}", e),
+            }))
+        }
     }
-
-    std::ptr::null_mut()
 }
 
 #[no_mangle]

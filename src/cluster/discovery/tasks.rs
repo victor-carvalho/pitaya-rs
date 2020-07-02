@@ -48,6 +48,7 @@ pub(super) async fn lease_keep_alive(
                             lease_ttl = Duration::from_secs(response.ttl() as u64);
                         } else {
                             // TODO(lhahn): what to do here?
+                            warn!(logger, "received empty lease keep alive response");
                         }
                     }
                 }
@@ -68,6 +69,7 @@ pub(super) async fn watch_task(
     servers_cache: Arc<RwLock<ServersCache>>,
     prefix: String,
     mut stream: etcd_client::WatchStream,
+    mut app_die_sender: mpsc::Sender<()>,
 ) {
     loop {
         debug!(logger, "watching for etcd changes...");
@@ -141,8 +143,13 @@ pub(super) async fn watch_task(
                 return;
             }
             Err(e) => {
-                // TODO(lhahn): should we send an event to kill the pod here?
-                panic!("failed to get watch message: {}", e);
+                // FIXME, TODO(lhahn): should we send an event to kill the pod here?
+                // panic!("failed to get watch message: {}", e);
+                error!(logger, "watch error"; "error" => %e);
+                let _ = app_die_sender.send(()).await.map_err(|_| {
+                    warn!(logger, "receiver side not listening");
+                });
+                return;
             }
         }
     }
@@ -150,9 +157,9 @@ pub(super) async fn watch_task(
 
 fn parse_server_kind_and_id(prefix: &str, string: &str) -> Option<(ServerKind, ServerId)> {
     let components: Vec<&str> = string.split('/').collect();
-    match &components[..] {
-        [key_prefix, "servers", server_kind, server_id] if *key_prefix == prefix => {
-            Some((ServerKind::from(*server_kind), ServerId::from(*server_id)))
+    match components[..] {
+        [key_prefix, "servers", server_kind, server_id] if key_prefix == prefix => {
+            Some((ServerKind::from(server_kind), ServerId::from(server_id)))
         }
         _ => None,
     }

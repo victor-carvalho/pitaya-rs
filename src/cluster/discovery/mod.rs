@@ -141,8 +141,8 @@ impl EtcdLazy {
         // TODO(lhahn): remove hardcoded max channel size.
         let max_chan_size = 80;
         Ok(Self {
-            config: config,
-            client: client,
+            config,
+            client,
             this_server: server,
             servers_cache: Arc::new(RwLock::new(ServersCache::new(
                 logger.new(o!()),
@@ -151,14 +151,14 @@ impl EtcdLazy {
             lease_id: None,
             keep_alive_task: None,
             watch_task: None,
-            logger: logger,
+            logger,
         })
     }
 
     pub(crate) async fn start(&mut self, app_die_sender: mpsc::Sender<()>) -> Result<(), Error> {
-        self.grant_lease(app_die_sender).await?;
+        self.grant_lease(app_die_sender.clone()).await?;
         self.add_server_to_etcd().await?;
-        self.start_watch().await?;
+        self.start_watch(app_die_sender).await?;
         Ok(())
     }
 
@@ -260,7 +260,7 @@ impl EtcdLazy {
         Ok(())
     }
 
-    async fn start_watch(&mut self) -> Result<(), Error> {
+    async fn start_watch(&mut self, app_die_sender: mpsc::Sender<()>) -> Result<(), Error> {
         let watch_prefix = format!("{}/servers/", self.config.prefix);
         let options = etcd_client::WatchOptions::new().with_prefix();
         let (watcher, watch_stream) = self.client.watch(watch_prefix, Some(options)).await?;
@@ -271,6 +271,7 @@ impl EtcdLazy {
             self.servers_cache.clone(),
             self.config.prefix.clone(),
             watch_stream,
+            app_die_sender,
         ));
         self.watch_task = Some((handle, watcher));
 

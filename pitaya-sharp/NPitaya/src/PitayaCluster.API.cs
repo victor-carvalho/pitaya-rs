@@ -29,6 +29,7 @@ namespace NPitaya
         // private static TaskFactory _rpcTaskFactory = new TaskFactory(Lcts);
         private static IntPtr pitaya;
         private static HandleRpcCallbackFunc handleRpcCallback;
+        private static ClusterNotificationCallbackFunc clusterNotificationCallback;
 
         private static Action _onSignalEvent;
 
@@ -117,6 +118,11 @@ namespace NPitaya
             });
         }
 
+        private static void ClusterNotificationCallback(IntPtr userData, NotificationType notificationType, IntPtr data)
+        {
+            // TODO(lhahn): implement this.
+        }
+
         private static void HandleRpcCallback(IntPtr userData, IntPtr rpc)
         {
             // var handle = GCHandle.FromIntPtr(userData);
@@ -150,6 +156,7 @@ namespace NPitaya
             IntPtr serverPtr = new StructWrapper(server);
 
             handleRpcCallback = new HandleRpcCallbackFunc(HandleRpcCallback);
+            clusterNotificationCallback = new ClusterNotificationCallbackFunc(ClusterNotificationCallback);
 
             IntPtr err = pitaya_initialize_with_nats(
                 natsCfgPtr,
@@ -159,6 +166,8 @@ namespace NPitaya
                 IntPtr.Zero,
                 logLevel,
                 logKind,
+                Marshal.GetFunctionPointerForDelegate(clusterNotificationCallback),
+                IntPtr.Zero,
                 out pitaya
             );
 
