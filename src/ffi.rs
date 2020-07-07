@@ -6,7 +6,6 @@ use prost::Message;
 use slog::{error, info, o, Drain};
 use std::{
     borrow::Cow,
-    collections::HashMap,
     convert::TryFrom,
     ffi::{c_void, CStr, CString},
     mem,
@@ -267,8 +266,6 @@ pub extern "C" fn pitaya_server_by_id(
         .server_by_id(&ServerId::from(server_id), &ServerKind::from(server_kind))
     {
         Ok(Some(sv)) => {
-            let metadata_cache = serde_json::to_string(sv.as_ref())
-                .expect("should not fail to convert metadata to json string");
             unsafe {
                 *server = Box::into_raw(Box::new(PitayaServer::new(sv)));
             }
