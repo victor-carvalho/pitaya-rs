@@ -62,9 +62,10 @@ pub struct NatsRpcServer {
 impl NatsRpcServer {
     pub fn new(logger: slog::Logger, this_server: Arc<Server>, config: Config) -> Self {
         Self {
-            config: config,
+            config,
+            this_server,
+            logger,
             connection: Arc::new(Mutex::new(None)),
-            this_server: this_server,
             runtime: Arc::new(Mutex::new(
                 tokio::runtime::Builder::new()
                     .threaded_scheduler()
@@ -75,7 +76,6 @@ impl NatsRpcServer {
                     .build()
                     .expect("failed to create the tokio scheduler"),
             )),
-            logger: logger,
         }
     }
 
@@ -140,10 +140,7 @@ impl NatsRpcServer {
             }
         };
 
-        match sender.try_send(Rpc {
-            req: req,
-            responder: responder,
-        }) {
+        match sender.try_send(Rpc { req, responder }) {
             Ok(_) => {
                 let runtime = runtime.lock().unwrap();
                 // For the moment we are ignoring the handle returned by the task.
