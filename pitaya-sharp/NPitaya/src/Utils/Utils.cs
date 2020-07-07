@@ -51,13 +51,18 @@ namespace NPitaya.Utils {
             return outData;
         }
 
-        internal static T GetProtoMessageFromBuffer<T>(IntPtr data, Int32 len)
+        internal static T GetProtoMessageFromBuffer<T>(byte[] data)
         {
-            byte[] resData = GetDataFromRawPointer(data, len);
-            var response = new Protos.Response();
-            response.MergeFrom(new CodedInputStream(resData));
+            var wrappedResponse = new Protos.Response();
+            wrappedResponse.MergeFrom(new CodedInputStream(data));
+
+            if (wrappedResponse.Error != null)
+            {
+                throw new PitayaException($"got error from response: code={wrappedResponse.Error.Code} msg={wrappedResponse.Error.Msg}");
+            }
+
             var res = (IMessage) Activator.CreateInstance(typeof(T));
-            res.MergeFrom(response.Data);
+            res.MergeFrom(wrappedResponse.Data);
             Logger.Debug("getProtoMsgFromResponse: got this res {0}", res);
             return (T) res;
         }

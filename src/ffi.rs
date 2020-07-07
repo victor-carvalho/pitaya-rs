@@ -507,6 +507,7 @@ pub extern "C" fn pitaya_send_rpc(
             route: route.as_ref().to_owned(),
             ..protos::Msg::default()
         }),
+        metadata: "{}".as_bytes().to_owned(),
         ..protos::Request::default()
     };
 

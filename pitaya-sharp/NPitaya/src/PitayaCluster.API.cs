@@ -136,6 +136,7 @@ namespace NPitaya
             {
                 var req = new Protos.Request();
                 req.MergeFrom(new CodedInputStream(data));
+
                 DispatchRpc(rpc, req);
             }
             catch (Exception e)
@@ -177,9 +178,6 @@ namespace NPitaya
                 pitaya_error_drop(err);
                 throw new PitayaException("Initialization failed");
             }
-
-            // AddServiceDiscoveryListener(serviceDiscoveryListener);
-            // ListenToIncomingRPCs();
         }
 
         public static void RegisterRemote(BaseRemote remote)
@@ -361,12 +359,14 @@ namespace NPitaya
                 {
                     // throw new PitayaException($"RPC call failed: ({retError.code}: {retError.msg})");
                     pitaya_error_drop(err);
+                    Console.WriteLine("OH NOT IT FAILEDDDD");
                     throw new PitayaException($"RPC call failed");
                 }
 
                 Int32 len;
                 IntPtr resData = pitaya_buffer_data(rpcResponse, out len);
-                T response = GetProtoMessageFromBuffer<T>(resData, len);
+
+                T response = GetProtoMessageFromBuffer<T>(GetDataFromRawPointer(resData, len));
                 pitaya_buffer_drop(rpcResponse);
                 return response;
             });
