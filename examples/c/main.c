@@ -61,6 +61,12 @@ handle_rpc(void *data, PitayaRpc *rpc)
     }
 }
 
+static void
+on_cluster_notification(void *userData, PitayaClusterNotification notification, void *value)
+{
+    printf("====> received notification: %d\n", notification);
+}
+
 int main()
 {
     PitayaNATSConfig nats_config = {0};
@@ -94,6 +100,8 @@ int main()
         NULL,
         PitayaLogLevel_Trace,
         PitayaLogKind_Console,
+        on_cluster_notification,
+        NULL,
         &pitaya
     );
 
