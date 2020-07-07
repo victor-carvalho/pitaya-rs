@@ -13,7 +13,7 @@ mod tasks;
 #[derive(Debug, Clone)]
 pub enum Notification {
     ServerAdded(Arc<Server>),
-    ServerRemoved(ServerId),
+    ServerRemoved(Arc<Server>),
 }
 
 #[async_trait]
@@ -77,9 +77,9 @@ impl ServersCache {
     }
 
     fn remove(&mut self, server_kind: &ServerKind, server_id: &ServerId) {
-        self.servers_by_id.remove(server_id).map(|_| {
+        self.servers_by_id.remove(server_id).map(|server| {
             debug!(self.logger, "server removed from cache"; "server_id" => &server_id.0);
-            self.notify(Notification::ServerRemoved(server_id.clone()));
+            self.notify(Notification::ServerRemoved(server));
         });
         self.servers_by_kind.remove(server_kind);
     }

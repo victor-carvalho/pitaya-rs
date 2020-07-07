@@ -42,12 +42,10 @@ namespace NPitaya
         public class ServiceDiscoveryListener
         {
             public Action<ServiceDiscoveryAction, Server> onServer;
-            public IntPtr NativeListenerHandle { get; set; }
             public ServiceDiscoveryListener(Action<ServiceDiscoveryAction, Server> onServer)
             {
                 Debug.Assert(onServer != null);
                 this.onServer = onServer;
-                NativeListenerHandle = IntPtr.Zero;
             }
         }
 
@@ -118,16 +116,24 @@ namespace NPitaya
             });
         }
 
-        private static void ClusterNotificationCallback(IntPtr userData, NotificationType notificationType, IntPtr data)
+        private static void ClusterNotificationCallback(IntPtr userData, NotificationType notificationType, IntPtr serverHandle)
         {
-            // TODO(lhahn): implement this.
+            if (_serviceDiscoveryListener == null)
+            {
+                return;
+            }
+
+            var server = new Server(serverHandle);
+            _serviceDiscoveryListener.onServer(
+                notificationType == NotificationType.ServerAdded
+                    ? ServiceDiscoveryAction.ServerAdded
+                    : ServiceDiscoveryAction.ServerRemoved,
+                server
+            );
         }
 
         private static void HandleRpcCallback(IntPtr userData, IntPtr rpc)
         {
-            // var handle = GCHandle.FromIntPtr(userData);
-            // var handle.Target
-
             Int32 len;
             IntPtr rawData = pitaya_rpc_request(rpc, out len);
             byte[] data = GetDataFromRawPointer(rawData, len);
@@ -154,15 +160,15 @@ namespace NPitaya
         {
             IntPtr natsCfgPtr = new StructWrapper(natsCfg);
             IntPtr sdCfgPtr = new StructWrapper(sdCfg);
-            IntPtr serverPtr = new StructWrapper(server);
 
+            _serviceDiscoveryListener = serviceDiscoveryListener;
             handleRpcCallback = new HandleRpcCallbackFunc(HandleRpcCallback);
             clusterNotificationCallback = new ClusterNotificationCallbackFunc(ClusterNotificationCallback);
 
             IntPtr err = pitaya_initialize_with_nats(
                 natsCfgPtr,
                 sdCfgPtr,
-                serverPtr,
+                server.Handle,
                 Marshal.GetFunctionPointerForDelegate(handleRpcCallback),
                 IntPtr.Zero,
                 logLevel,
@@ -243,21 +249,20 @@ namespace NPitaya
 
         public static void Terminate()
         {
-            RemoveServiceDiscoveryListener(_serviceDiscoveryListener);
             pitaya_shutdown(pitaya);
             MetricsReporters.Terminate();
         }
 
-        public static Server? GetServerById(string serverId, string serverKind)
+        public static Server GetServerById(string serverId, string serverKind)
         {
-            var retServer = new Server();
-            bool ok = pitaya_server_by_id(pitaya, serverId, serverKind, ref retServer);
+            IntPtr serverHandle = IntPtr.Zero;
+            bool ok = pitaya_server_by_id(pitaya, serverId, serverKind, ref serverHandle);
             if (!ok)
             {
                 Logger.Error($"There are no servers with id {serverId}");
                 return null;
             }
-            return retServer;
+            return new Server(serverHandle);
         }
 
         public static unsafe Task<bool> SendPushToUser(string frontendId, string serverType, string route, string uid,
@@ -355,12 +360,11 @@ namespace NPitaya
                     pitaya_buffer_drop(request);
                 }
 
-                if (err != IntPtr.Zero) // error
+                if (err != IntPtr.Zero)
                 {
-                    // throw new PitayaException($"RPC call failed: ({retError.code}: {retError.msg})");
+                    var pitayaError = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
                     pitaya_error_drop(err);
-                    Console.WriteLine("OH NOT IT FAILEDDDD");
-                    throw new PitayaException($"RPC call failed");
+                    throw new PitayaException($"RPC call failed: ({pitayaError.Code}: {pitayaError.Message})");
                 }
 
                 Int32 len;
@@ -396,30 +400,30 @@ namespace NPitaya
                 serviceDiscoveryListener.onServer(ServiceDiscoveryAction.ServerRemoved, server);
         }
 
-        private static void AddServiceDiscoveryListener(ServiceDiscoveryListener listener)
-        {
-            _serviceDiscoveryListener = listener;
-            if (listener == null)
-                return;
+        // private static void AddServiceDiscoveryListener(ServiceDiscoveryListener listener)
+        // {
+        //     _serviceDiscoveryListener = listener;
+        //     if (listener == null)
+        //         return;
 
-            _serviceDiscoveryListenerHandle = GCHandle.Alloc(_serviceDiscoveryListener);
+        //     _serviceDiscoveryListenerHandle = GCHandle.Alloc(_serviceDiscoveryListener);
 
-            IntPtr nativeListenerHandle = tfg_pitc_AddServiceDiscoveryListener(
-                OnServerAddedOrRemovedNativeCb,
-                (IntPtr)_serviceDiscoveryListenerHandle
-            );
+        //     IntPtr nativeListenerHandle = tfg_pitc_AddServiceDiscoveryListener(
+        //         OnServerAddedOrRemovedNativeCb,
+        //         (IntPtr)_serviceDiscoveryListenerHandle
+        //     );
 
-            listener.NativeListenerHandle = nativeListenerHandle;
-        }
+        //     listener.NativeListenerHandle = nativeListenerHandle;
+        // }
 
-        private static void RemoveServiceDiscoveryListener(ServiceDiscoveryListener listener)
-        {
-            if (listener != null)
-            {
-                tfg_pitc_RemoveServiceDiscoveryListener(listener.NativeListenerHandle);
-                _serviceDiscoveryListenerHandle.Free();
-                _serviceDiscoveryListener = null;
-            }
-        }
+        // private static void RemoveServiceDiscoveryListener(ServiceDiscoveryListener listener)
+        // {
+        //     if (listener != null)
+        //     {
+        //         tfg_pitc_RemoveServiceDiscoveryListener(listener.NativeListenerHandle);
+        //         _serviceDiscoveryListenerHandle.Free();
+        //         _serviceDiscoveryListener = null;
+        //     }
+        // }
     }
 }

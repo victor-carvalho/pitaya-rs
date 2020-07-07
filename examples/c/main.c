@@ -62,9 +62,10 @@ handle_rpc(void *data, PitayaRpc *rpc)
 }
 
 static void
-on_cluster_notification(void *userData, PitayaClusterNotification notification, void *value)
+on_cluster_notification(void *userData, PitayaClusterNotification notification, PitayaServer *server)
 {
     printf("====> received notification: %d\n", notification);
+    pitaya_server_drop(server);
 }
 
 int main()
@@ -82,12 +83,13 @@ int main()
     sd_config.endpoints = "localhost:2379";
     sd_config.etcd_prefix = "pitaya";
 
-    PitayaServer server = {0};
-    server.id = "my-server-id-from-c";
-    server.kind = "my-server-kind-from-c";
-    server.metadata = "random-metadata";
-    server.hostname = "";
-    server.frontend = 0;
+    PitayaServer *server = pitaya_server_new(
+        "my-server-id-from-c",
+        "my-server-kind-from-c",
+        "random-metadata",
+        "",
+        0
+    );
 
     PitayaError *err = NULL;
     Pitaya *pitaya = NULL;
@@ -95,7 +97,7 @@ int main()
     err = pitaya_initialize_with_nats(
         &nats_config,
         &sd_config,
-        &server,
+        server,
         handle_rpc,
         NULL,
         PitayaLogLevel_Trace,
@@ -158,13 +160,15 @@ int main()
     }
 
     printf("Getting server by id...\n");
-    PitayaServer found_server;
+    PitayaServer *found_server;
     int ok = pitaya_server_by_id(pitaya, "server_id", "server_kind", &found_server);
     if (ok) {
         printf("Server was found!\n");
     } else {
         printf("Server was NOT found!\n");
     }
+
+    pitaya_server_drop(server);
 
     pitaya_wait_shutdown_signal(pitaya);
 

@@ -30,6 +30,8 @@ typedef struct PitayaError PitayaError;
 
 typedef struct PitayaRpc PitayaRpc;
 
+typedef struct PitayaServer PitayaServer;
+
 typedef struct {
     char *addr;
     int64_t connection_timeout_ms;
@@ -52,17 +54,9 @@ typedef struct {
     int32_t max_number_of_retries;
 } PitayaSDConfig;
 
-typedef struct {
-    char *id;
-    char *kind;
-    char *metadata;
-    char *hostname;
-    int32_t frontend;
-} PitayaServer;
-
 typedef void (*PitayaHandleRpcCallback)(void*, PitayaRpc*);
 
-typedef void (*PitayaClusterNotificationCallback)(void*, PitayaClusterNotification, void*);
+typedef void (*PitayaClusterNotificationCallback)(void*, PitayaClusterNotification, PitayaServer*);
 
 const uint8_t *pitaya_buffer_data(PitayaBuffer *buf, int32_t *len);
 
@@ -102,9 +96,25 @@ PitayaError *pitaya_send_rpc(Pitaya *pitaya_server,
 bool pitaya_server_by_id(Pitaya *pitaya_server,
                          char *server_id,
                          char *server_kind,
-                         PitayaServer *server);
+                         PitayaServer **server);
 
 void pitaya_server_drop(PitayaServer *pitaya_server);
+
+int32_t pitaya_server_frontend(PitayaServer *server);
+
+const char *pitaya_server_hostname(PitayaServer *server);
+
+const char *pitaya_server_id(PitayaServer *server);
+
+const char *pitaya_server_kind(PitayaServer *server);
+
+const char *pitaya_server_metadata(PitayaServer *server);
+
+PitayaServer *pitaya_server_new(char *id,
+                                char *kind,
+                                char *metadata,
+                                char *hostname,
+                                int32_t frontend);
 
 void pitaya_shutdown(Pitaya *pitaya_server);
 

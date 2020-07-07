@@ -33,7 +33,7 @@ namespace PitayaCSharpExample
 
       var sv = new Server(
           id: serverId,
-          type: "csharp",
+          kind: "csharp",
           metadata: "",
           hostname: "localhost",
           frontend: false);
@@ -81,13 +81,13 @@ namespace PitayaCSharpExample
                 {
                     case PitayaCluster.ServiceDiscoveryAction.ServerAdded:
                         Console.WriteLine("Server was added");
-                        Console.WriteLine("    id: " + server.id);
-                        Console.WriteLine("  type: " + server.type);
+                        Console.WriteLine("    id: " + server.Id);
+                        Console.WriteLine("  kind: " + server.Kind);
                         break;
                     case PitayaCluster.ServiceDiscoveryAction.ServerRemoved:
                         Console.WriteLine("Server was removed");
-                        Console.WriteLine("    id: " + server.id);
-                        Console.WriteLine("  type: " + server.type);
+                        Console.WriteLine("    id: " + server.Id);
+                        Console.WriteLine("  kind: " + server.Kind);
                         break;
                     default:
                         throw new ArgumentOutOfRangeException(nameof(action), action, null);

@@ -65,10 +65,22 @@ namespace NPitaya
         // Server
         //
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern bool pitaya_server_by_id(IntPtr pitaya, string serverId, string serverKind, ref Server server);
+        private static extern bool pitaya_server_by_id(IntPtr pitaya, string serverId, string serverKind, ref IntPtr server);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern IntPtr pitaya_server_new(string id, string kind, string metadata, string hostname, Int32 frontend);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern IntPtr pitaya_server_id(IntPtr server);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern IntPtr pitaya_server_kind(IntPtr server);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern IntPtr pitaya_server_metadata(IntPtr server);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern IntPtr pitaya_server_hostname(IntPtr server);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern Int32 pitaya_server_frontend(IntPtr server);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern void pitaya_server_drop(IntPtr serverPtr);
+        internal static extern void pitaya_server_drop(IntPtr serverPtr);
 
         //
         // RPC

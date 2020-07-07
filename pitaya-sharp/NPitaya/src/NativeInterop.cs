@@ -5,6 +5,18 @@ using PitayaSimpleJson;
 
 namespace NPitaya
 {
+    public struct PitayaError
+    {
+        public string Code;
+        public string Message;
+
+        public PitayaError(IntPtr codePtr, IntPtr msgPtr)
+        {
+            this.Code = Marshal.PtrToStringAnsi(codePtr);
+            this.Message = Marshal.PtrToStringAnsi(msgPtr);
+        }
+    }
+
     public enum NotificationType
     {
         ServerAdded = 0,
@@ -18,27 +30,31 @@ namespace NPitaya
         public IntPtr tag;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct Server
+    public class Server
     {
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string id;
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string type;
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string metadata;
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string hostname;
+        IntPtr serverHandle;
 
-        public int frontend;
-
-        public Server(string id, string type, string metadata, string hostname, bool frontend)
+        public Server(string id, string kind, string metadata, string hostname, bool frontend)
         {
-            this.id = id;
-            this.type = type;
-            this.metadata = metadata;
-            this.hostname = hostname;
-            this.frontend = Convert.ToInt32(frontend);
+            serverHandle = PitayaCluster.pitaya_server_new(id, kind, metadata, hostname, frontend ? 1 : 0);
+        }
+
+        public Server(IntPtr serverHandle)
+        {
+            this.serverHandle = serverHandle;
+        }
+
+        public string Id => Marshal.PtrToStringAnsi(PitayaCluster.pitaya_server_id(serverHandle));
+        public string Kind => Marshal.PtrToStringAnsi(PitayaCluster.pitaya_server_kind(serverHandle));
+        public string Metadata => Marshal.PtrToStringAnsi(PitayaCluster.pitaya_server_metadata(serverHandle));
+        public string Hostname => Marshal.PtrToStringAnsi(PitayaCluster.pitaya_server_hostname(serverHandle));
+        public bool Frontend => PitayaCluster.pitaya_server_frontend(serverHandle) != 0;
+        public IntPtr Handle => serverHandle;
+
+        ~Server()
+        {
+            PitayaCluster.pitaya_server_drop(serverHandle);
+            serverHandle = IntPtr.Zero;
         }
     }
 
