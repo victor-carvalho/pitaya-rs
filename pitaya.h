@@ -90,7 +90,8 @@ PitayaError *pitaya_rpc_respond(PitayaRpc *rpc, const uint8_t *response_data, in
 PitayaError *pitaya_send_kick(Pitaya *pitaya_server,
                               char *server_id,
                               char *server_kind,
-                              PitayaBuffer *kick_buffer);
+                              PitayaBuffer *kick_buffer,
+                              PitayaBuffer **kick_answer);
 
 PitayaError *pitaya_send_rpc(Pitaya *pitaya_server,
                              char *server_id,

@@ -17,6 +17,7 @@ pub enum Error {
     InvalidRoute,
     InvalidUserId,
     InvalidServerKind,
+    InvalidProto(prost::DecodeError),
 }
 
 impl std::fmt::Display for Error {
@@ -36,6 +37,7 @@ impl std::fmt::Display for Error {
             Error::Tokio(ref e) => write!(f, "tokio: {}", e),
             Error::InvalidUserId => write!(f, "invalid user id"),
             Error::InvalidServerKind => write!(f, "invalid server kind"),
+            Error::InvalidProto(e) => write!(f, "invalid proto: {}", e),
         }
     }
 }
@@ -50,6 +52,7 @@ impl std::error::Error for Error {
             Error::Json(ref e) => Some(e),
             Error::TaskJoin(ref e) => Some(e),
             Error::Tokio(ref e) => Some(e),
+            Error::InvalidProto(ref e) => Some(e),
             _ => None,
         }
     }

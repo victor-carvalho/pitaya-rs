@@ -11,7 +11,7 @@ pub trait RpcClient {
         server_id: &ServerId,
         server_kind: &ServerKind,
         kick_msg: protos::KickMsg,
-    ) -> Result<(), Error>;
+    ) -> Result<protos::KickAnswer, Error>;
 }
 
 pub struct Config {
@@ -91,7 +91,7 @@ impl RpcClient for NatsClient {
         _server_id: &ServerId,
         server_kind: &ServerKind,
         kick_msg: protos::KickMsg,
-    ) -> Result<(), Error> {
+    ) -> Result<protos::KickAnswer, Error> {
         trace!(self.logger, "NatsClient::kick_user");
         let connection = self
             .connection
@@ -110,11 +110,12 @@ impl RpcClient for NatsClient {
         let kick_buffer = utils::encode_proto(&kick_msg);
 
         // TODO(lhahn): should we handle the returned message here somehow?
-        let _message = connection
+        let message = connection
             .request_timeout(&topic, kick_buffer, self.config.request_timeout)
             .map_err(|e| Error::Nats(e))?;
 
-        Ok(())
+        let kick_answer = Message::decode(&message.data[..]).map_err(|e| Error::InvalidProto(e))?;
+        Ok(kick_answer)
     }
 }
 

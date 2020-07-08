@@ -565,6 +565,7 @@ pub extern "C" fn pitaya_send_kick(
     server_id: *mut c_char,
     server_kind: *mut c_char,
     kick_buffer: *mut PitayaBuffer,
+    kick_answer: *mut *mut PitayaBuffer,
 ) -> *mut PitayaError {
     assert!(!pitaya_server.is_null());
     assert!(!server_id.is_null());
@@ -586,15 +587,20 @@ pub extern "C" fn pitaya_send_kick(
         }
     };
 
-    if let Err(e) = pitaya_server
+    match pitaya_server
         .pitaya_server
         .send_kick(&server_id, &server_kind, kick_msg)
     {
-        return Box::into_raw(Box::new(PitayaError {
+        Ok(answer) => {
+            let buffer = utils::encode_proto(&answer);
+            unsafe {
+                *kick_answer = Box::into_raw(Box::new(PitayaBuffer { data: buffer }));
+            }
+            std::ptr::null_mut()
+        }
+        Err(e) => Box::into_raw(Box::new(PitayaError {
             code: "PIT-500".to_owned(),
             message: format!("failed to send kick: {}", e),
-        }));
+        })),
     }
-
-    std::ptr::null_mut()
 }
