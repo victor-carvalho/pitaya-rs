@@ -100,6 +100,7 @@ namespace NPitaya
             IntPtr pitaya,
             string serverId,
             string serverKind,
-            IntPtr kickBuffer);
+            IntPtr kickBuffer,
+            out IntPtr kickAnswer);
     }
 }

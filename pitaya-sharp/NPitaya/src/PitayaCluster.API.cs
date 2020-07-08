@@ -308,39 +308,33 @@ namespace NPitaya
             });
         }
 
-        public static unsafe Task<bool> SendKickToUser(string frontendId, string serverType, KickMsg kick)
+        public static unsafe Task<bool> SendKickToUser(string frontendId, string serverKind, KickMsg kick)
         {
             return Task.Run(() =>
             {
-                IntPtr err = IntPtr.Zero;
-                IntPtr inMemBuf = IntPtr.Zero;
-                IntPtr outMemBufPtr;
-                var retError = new Error();
-
-                try
+                var data = kick.ToByteArray();
+                fixed (byte* p = data)
                 {
-                    var data = kick.ToByteArray();
-                    fixed (byte* p = data)
+                    IntPtr kickAnswerPtr = IntPtr.Zero;
+                    IntPtr kickBuffer = pitaya_buffer_new((IntPtr)p, data.Length);
+                    IntPtr err = pitaya_send_kick(pitaya, frontendId, serverKind, kickBuffer, out kickAnswerPtr);
+                    pitaya_buffer_drop(kickBuffer);
+                    if (err != IntPtr.Zero)
                     {
-                        // inMemBuf.data = (IntPtr) p;
-                        // inMemBuf.size = data.Length;
-                        // IntPtr inMemBufPtr = new StructWrapper(inMemBuf);
-                        // err = KickInternal(frontendId, serverType, inMemBuf, out outMemBufPtr);
-                        // if (err != IntPtr.Zero) // error
-                        {
-                            // Logger.Error($"Push failed: ({retError.code}: {retError.msg})");
-                            return false;
-                        }
-
-                        var kickAns = new KickAnswer();
-                        // kickAns.MergeFrom(new CodedInputStream(outMemBufPtr->GetData()));
-
-                        return kickAns.Kicked;
+                        var pitayaError = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
+                        pitaya_error_drop(err);
+                        Logger.Error($"Push failed: ({pitayaError.Code}: {pitayaError.Message})");
+                        return false;
                     }
-                }
-                finally
-                {
-                    // if (outMemBufPtr != null) FreeMemoryBufferInternal(outMemBufPtr);
+
+                    Int32 len;
+                    IntPtr resData = pitaya_buffer_data(kickAnswerPtr, out len);
+
+                    var kickAnswer = new KickAnswer();
+                    kickAnswer.MergeFrom(new CodedInputStream(GetDataFromRawPointer(resData, len)));
+
+                    pitaya_buffer_drop(kickAnswerPtr);
+                    return kickAnswer.Kicked;
                 }
             });
         }
