@@ -189,11 +189,7 @@ impl NatsRpcServer {
         reply_topic: &str,
         res: protos::Response,
     ) -> Result<(), Error> {
-        let buffer = {
-            let mut b = Vec::with_capacity(res.encoded_len());
-            res.encode(&mut b).map(|_| b)
-        }
-        .expect("failed to encode response");
+        let buffer = utils::encode_proto(&res);
         connection
             .publish(reply_topic, buffer)
             .map_err(|err| Error::Nats(err))

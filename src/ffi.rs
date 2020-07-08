@@ -1,5 +1,5 @@
 use crate::{
-    cluster, protos, EtcdConfig, PitayaBuilder, RpcClientConfig, RpcServerConfig, ServerId,
+    cluster, protos, utils, EtcdConfig, PitayaBuilder, RpcClientConfig, RpcServerConfig, ServerId,
     ServerKind,
 };
 use prost::Message;
@@ -408,13 +408,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
                 "!!!!!!!! received rpc req: {:?}",
                 rpc.request()
             );
-            let request_buffer: Vec<u8> = {
-                let mut b = Vec::with_capacity(rpc.request().encoded_len());
-                rpc.request()
-                    .encode(&mut b)
-                    .expect("failed to encode request");
-                b
-            };
+            let request_buffer = utils::encode_proto(rpc.request());
             let rpc = Box::into_raw(Box::new(PitayaRpc {
                 request: request_buffer,
                 responder: rpc.responder(),
@@ -554,19 +548,7 @@ pub extern "C" fn pitaya_send_rpc(
     };
 
     // We don't drop response buffer because we'll pass it to the C code.
-    let response_data: Vec<u8> = {
-        let mut b = Vec::with_capacity(res.encoded_len());
-        match res.encode(&mut b).map(|_| b) {
-            Ok(b) => b,
-            Err(e) => {
-                error!(logger, "received invalid response proto!");
-                return Box::into_raw(Box::new(PitayaError {
-                    code: "PIT-500".to_owned(),
-                    message: format!("invalid response proto: {}", e),
-                }));
-            }
-        }
-    };
+    let response_data = utils::encode_proto(&res);
 
     unsafe {
         (*response_buffer) = Box::into_raw(Box::new(PitayaBuffer {

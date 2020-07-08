@@ -15,6 +15,8 @@ pub enum Error {
     ChannelReceiverClosed,
     RpcServerAlreadyStarted,
     InvalidRoute,
+    InvalidUserId,
+    InvalidServerKind,
 }
 
 impl std::fmt::Display for Error {
@@ -32,6 +34,8 @@ impl std::fmt::Display for Error {
             Error::RpcServerAlreadyStarted => write!(f, "rpc server has already started"),
             Error::ChannelReceiverClosed => write!(f, "channel receiver closed"),
             Error::Tokio(ref e) => write!(f, "tokio: {}", e),
+            Error::InvalidUserId => write!(f, "invalid user id"),
+            Error::InvalidServerKind => write!(f, "invalid server kind"),
         }
     }
 }

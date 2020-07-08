@@ -27,3 +27,14 @@ pub(crate) fn random_server(servers: &[Arc<Server>]) -> Option<Arc<Server>> {
         Some(servers[random_index].clone())
     }
 }
+
+pub(crate) fn encode_proto<P>(msg: &P) -> Vec<u8>
+where
+    P: prost::Message,
+{
+    let mut b = Vec::with_capacity(msg.encoded_len());
+    // NOTE(lhahn): An error is only returned here if the buffer does not have enough capacity
+    // therefore we can safely ignore it
+    msg.encode(&mut b).expect("failed to encode proto message");
+    b
+}

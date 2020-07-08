@@ -67,7 +67,6 @@ impl<'a> std::convert::TryFrom<&'a str> for Route<'a> {
 // Pitaya represent a pitaya server.
 // Currently, it only implements cluster mode.
 pub struct Pitaya {
-    this_server: Arc<Server>,
     service_discovery: cluster::discovery::EtcdLazy,
     nats_rpc_client: cluster::rpc_client::NatsClient,
     nats_rpc_server: cluster::rpc_server::NatsRpcServer,
@@ -101,35 +100,34 @@ impl Pitaya {
         debug!(logger, "this server: {:?}", this_server);
 
         // TODO(lhahn): let user parameterize this runtime.
-        let mut rt = tokio::runtime::Runtime::new()
+        let mut runtime = tokio::runtime::Runtime::new()
             .map_err(|e| Error::Tokio(e))
             .expect("failed to create tokio runtime");
 
-        let client = cluster::rpc_client::NatsClient::new(
+        let nats_rpc_client = cluster::rpc_client::NatsClient::new(
             logger.new(o!("module" => "rpc_client")),
             rpc_client_config,
         );
-        let server = cluster::rpc_server::NatsRpcServer::new(
+        let nats_rpc_server = cluster::rpc_server::NatsRpcServer::new(
             logger.new(o!("module" => "rpc_server")),
             this_server.clone(),
             rpc_server_config,
         );
-        let service_discovery = rt.block_on({
+        let service_discovery = runtime.block_on({
             let logger = logger.new(o!("module" => "service_discovery"));
             let server = this_server.clone();
             async move { cluster::discovery::EtcdLazy::new(logger, server, etcd_config).await }
         })?;
 
         Ok(Self {
-            this_server: this_server,
-            service_discovery: service_discovery,
-            nats_rpc_client: client,
-            nats_rpc_server: server,
-            runtime: rt,
+            service_discovery,
+            nats_rpc_client,
+            nats_rpc_server,
+            runtime,
             _shutdown_timeout: shutdown_timeout,
             listen_for_rpc_task: None,
             graceful_shutdown_task: None,
-            logger: logger,
+            logger,
         })
     }
 
@@ -249,6 +247,10 @@ impl Pitaya {
             error!(self.logger, "found no servers for kind"; "kind" => &server_kind.0);
             Err(Error::NoServersFound(server_kind))
         }
+    }
+
+    pub fn send_kick(&mut self) -> Result<(), Error> {
+        todo!()
     }
 
     fn start<RpcHandler>(&mut self, rpc_handler: RpcHandler) -> Result<oneshot::Receiver<()>, Error>

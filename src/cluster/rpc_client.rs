@@ -1,4 +1,4 @@
-use crate::{error::Error, protos, utils, Server};
+use crate::{error::Error, protos, utils, Server, ServerId, ServerKind};
 use prost::Message;
 use slog::trace;
 use std::sync::Arc;
@@ -6,6 +6,12 @@ use std::time::Duration;
 
 pub trait RpcClient {
     fn call(&self, target: Arc<Server>, req: protos::Request) -> Result<protos::Response, Error>;
+    fn kick_user(
+        &self,
+        server_id: &ServerId,
+        server_kind: &ServerKind,
+        kick_msg: protos::KickMsg,
+    ) -> Result<(), Error>;
 }
 
 pub struct Config {
@@ -65,22 +71,50 @@ impl RpcClient for NatsClient {
             .as_ref()
             .ok_or(Error::NatsConnectionNotOpen)?;
         let topic = utils::topic_for_server(&target);
-        let buffer = {
-            let mut b = Vec::with_capacity(req.encoded_len());
-            req.encode(&mut b).map(|_| b)
-        }?;
+        let buffer = utils::encode_proto(&req);
 
         trace!(
             self.logger,
             "sending nats request"; "topic" => &topic, "timeout" => self.config.request_timeout.as_secs()
         );
         let message = connection
-            .request_timeout(&topic, &buffer, self.config.request_timeout)
+            .request_timeout(&topic, buffer, self.config.request_timeout)
             .map_err(|e| Error::Nats(e))?;
 
         let response = Message::decode(message.data.as_ref())?;
 
         Ok(response)
+    }
+
+    fn kick_user(
+        &self,
+        _server_id: &ServerId,
+        server_kind: &ServerKind,
+        kick_msg: protos::KickMsg,
+    ) -> Result<(), Error> {
+        trace!(self.logger, "NatsClient::kick_user");
+        let connection = self
+            .connection
+            .as_ref()
+            .ok_or(Error::NatsConnectionNotOpen)?;
+        // NOTE: Ignore server_id, since it is not necessary to create the topic.
+        if kick_msg.user_id.is_empty() {
+            return Err(Error::InvalidUserId);
+        }
+
+        if server_kind.0.is_empty() {
+            return Err(Error::InvalidServerKind);
+        }
+
+        let topic = utils::user_kick_topic(&kick_msg.user_id, server_kind);
+        let kick_buffer = utils::encode_proto(&kick_msg);
+
+        // TODO(lhahn): should we handle the returned message here somehow?
+        let _message = connection
+            .request_timeout(&topic, kick_buffer, self.config.request_timeout)
+            .map_err(|e| Error::Nats(e))?;
+
+        Ok(())
     }
 }
 

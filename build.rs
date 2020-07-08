@@ -7,6 +7,7 @@ fn main() {
         &[
             "./pitaya-protos/request.proto",
             "./pitaya-protos/response.proto",
+            "./pitaya-protos/kick.proto",
         ],
         &["./pitaya-protos"],
     )
