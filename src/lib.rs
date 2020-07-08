@@ -249,8 +249,14 @@ impl Pitaya {
         }
     }
 
-    pub fn send_kick(&mut self) -> Result<(), Error> {
-        todo!()
+    pub fn send_kick(
+        &mut self,
+        server_id: &ServerId,
+        server_kind: &ServerKind,
+        kick_msg: protos::KickMsg,
+    ) -> Result<(), Error> {
+        self.nats_rpc_client
+            .kick_user(server_id, server_kind, kick_msg)
     }
 
     fn start<RpcHandler>(&mut self, rpc_handler: RpcHandler) -> Result<oneshot::Receiver<()>, Error>

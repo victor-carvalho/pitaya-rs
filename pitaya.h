@@ -87,6 +87,11 @@ uint8_t *pitaya_rpc_request(PitayaRpc *rpc, int32_t *len);
 
 PitayaError *pitaya_rpc_respond(PitayaRpc *rpc, const uint8_t *response_data, int32_t response_len);
 
+PitayaError *pitaya_send_kick(Pitaya *pitaya_server,
+                              char *server_id,
+                              char *server_kind,
+                              PitayaBuffer *kick_buffer);
+
 PitayaError *pitaya_send_rpc(Pitaya *pitaya_server,
                              char *server_id,
                              char *route,
