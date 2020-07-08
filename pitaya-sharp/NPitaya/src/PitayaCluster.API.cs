@@ -55,7 +55,7 @@ namespace NPitaya
         public static void AddSignalHandler(Action cb)
         {
             _onSignalEvent += cb;
-            OnSignalInternal(OnSignal);
+            // OnSignalInternal(OnSignal);
         }
 
         private static void OnSignal()
@@ -291,8 +291,8 @@ namespace NPitaya
                         inMemBuf.size = data.Length;
                         IntPtr inMemBufPtr = new StructWrapper(inMemBuf);
 
-                        err = PushInternal(frontendId, serverType, inMemBufPtr, out outMemBufPtr);
-                        if (err != IntPtr.Zero) // error
+                        // err = PushInternal(frontendId, serverType, inMemBufPtr, out outMemBufPtr);
+                        // if (err != IntPtr.Zero) // error
                         {
                             // Logger.Error($"Push failed: ({retError.code}: {retError.msg})");
                             return false;
@@ -325,8 +325,8 @@ namespace NPitaya
                         // inMemBuf.data = (IntPtr) p;
                         // inMemBuf.size = data.Length;
                         // IntPtr inMemBufPtr = new StructWrapper(inMemBuf);
-                        err = KickInternal(frontendId, serverType, inMemBuf, out outMemBufPtr);
-                        if (err != IntPtr.Zero) // error
+                        // err = KickInternal(frontendId, serverType, inMemBuf, out outMemBufPtr);
+                        // if (err != IntPtr.Zero) // error
                         {
                             // Logger.Error($"Push failed: ({retError.code}: {retError.msg})");
                             return false;

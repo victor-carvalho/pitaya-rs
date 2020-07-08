@@ -92,29 +92,14 @@ namespace NPitaya
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern IntPtr pitaya_rpc_drop(IntPtr rpc);
 
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_FreeMemoryBuffer")]
-        private static extern unsafe void FreeMemoryBufferInternal(MemoryBuffer *ptr);
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_OnSignal")]
-        private static extern void OnSignalInternal(OnSignalFunc ptr);
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_WaitForRpc")]
-        private static extern IntPtr tfg_pitc_WaitForRpc();
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_FinishRpcCall")]
-        private static extern void tfg_pitc_FinishRpcCall(IntPtr responseMemoryBufferPtr, IntPtr crpcPtr);
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_SendPushToUser")]
-        private static extern unsafe IntPtr PushInternal(string serverId, string serverType, IntPtr pushData, out IntPtr buffer);
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "tfg_pitc_SendKickToUser")]
-        private static extern unsafe IntPtr KickInternal(string serverId, string serverType, IntPtr pushData, out IntPtr buffer);
-
+        //
+        // Kick
+        //
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr tfg_pitc_AddServiceDiscoveryListener(ServerAddedOrRemoved cb, IntPtr user);
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern void tfg_pitc_RemoveServiceDiscoveryListener(IntPtr listener);
+        private static extern IntPtr pitaya_send_kick(
+            IntPtr pitaya,
+            string serverId,
+            string serverKind,
+            IntPtr kickBuffer);
     }
 }
