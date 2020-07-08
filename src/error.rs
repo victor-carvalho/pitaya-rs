@@ -37,7 +37,7 @@ impl std::fmt::Display for Error {
             Error::Tokio(ref e) => write!(f, "tokio: {}", e),
             Error::InvalidUserId => write!(f, "invalid user id"),
             Error::InvalidServerKind => write!(f, "invalid server kind"),
-            Error::InvalidProto(e) => write!(f, "invalid proto: {}", e),
+            Error::InvalidProto(ref e) => write!(f, "invalid proto: {}", e),
         }
     }
 }
