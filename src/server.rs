@@ -10,9 +10,12 @@ impl ServerKind {
     }
 }
 
-impl From<&str> for ServerKind {
-    fn from(s: &str) -> Self {
-        Self(s.to_owned())
+impl<S> From<S> for ServerKind
+where
+    S: std::string::ToString,
+{
+    fn from(s: S) -> Self {
+        Self(s.to_string())
     }
 }
 
@@ -25,9 +28,12 @@ impl ServerId {
     }
 }
 
-impl From<&str> for ServerId {
-    fn from(s: &str) -> Self {
-        Self(s.to_owned())
+impl<S> From<S> for ServerId
+where
+    S: std::string::ToString,
+{
+    fn from(s: S) -> Self {
+        Self(s.to_string())
     }
 }
 
