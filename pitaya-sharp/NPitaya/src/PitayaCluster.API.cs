@@ -25,8 +25,6 @@ namespace NPitaya
         private delegate void OnSignalFunc();
         private static readonly Dictionary<string, RemoteMethod> RemotesDict = new Dictionary<string, RemoteMethod>();
         private static readonly Dictionary<string, RemoteMethod> HandlersDict = new Dictionary<string, RemoteMethod>();
-        // private static readonly LimitedConcurrencyLevelTaskScheduler Lcts = new LimitedConcurrencyLevelTaskScheduler(ProcessorsCount);
-        // private static TaskFactory _rpcTaskFactory = new TaskFactory(Lcts);
         private static IntPtr pitaya;
         private static HandleRpcCallbackFunc handleRpcCallback;
         private static ClusterNotificationCallbackFunc clusterNotificationCallback;
@@ -393,31 +391,5 @@ namespace NPitaya
             else
                 serviceDiscoveryListener.onServer(ServiceDiscoveryAction.ServerRemoved, server);
         }
-
-        // private static void AddServiceDiscoveryListener(ServiceDiscoveryListener listener)
-        // {
-        //     _serviceDiscoveryListener = listener;
-        //     if (listener == null)
-        //         return;
-
-        //     _serviceDiscoveryListenerHandle = GCHandle.Alloc(_serviceDiscoveryListener);
-
-        //     IntPtr nativeListenerHandle = tfg_pitc_AddServiceDiscoveryListener(
-        //         OnServerAddedOrRemovedNativeCb,
-        //         (IntPtr)_serviceDiscoveryListenerHandle
-        //     );
-
-        //     listener.NativeListenerHandle = nativeListenerHandle;
-        // }
-
-        // private static void RemoveServiceDiscoveryListener(ServiceDiscoveryListener listener)
-        // {
-        //     if (listener != null)
-        //     {
-        //         tfg_pitc_RemoveServiceDiscoveryListener(listener.NativeListenerHandle);
-        //         _serviceDiscoveryListenerHandle.Free();
-        //         _serviceDiscoveryListener = null;
-        //     }
-        // }
     }
 }
