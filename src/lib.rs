@@ -259,6 +259,16 @@ impl Pitaya {
             .kick_user(server_id, server_kind, kick_msg)
     }
 
+    pub fn send_push_to_user(
+        &mut self,
+        server_id: &ServerId,
+        server_kind: &ServerKind,
+        push_msg: protos::Push,
+    ) -> Result<(), Error> {
+        self.nats_rpc_client
+            .push_to_user(server_id, server_kind, push_msg)
+    }
+
     fn start<RpcHandler>(&mut self, rpc_handler: RpcHandler) -> Result<oneshot::Receiver<()>, Error>
     where
         RpcHandler: FnMut(cluster::Rpc) + Send + 'static,
