@@ -263,16 +263,15 @@ namespace NPitaya
             return new Server(serverHandle);
         }
 
-        public static unsafe Task<bool> SendPushToUser(string frontendId, string serverType, string route, string uid,
+        public static unsafe Task<bool> SendPushToUser(
+            string frontendId,
+            string serverKind,
+            string route,
+            string uid,
             object pushMsg)
         {
             return Task.Run(() =>
             {
-                IntPtr err = IntPtr.Zero;
-                MemoryBuffer inMemBuf = new MemoryBuffer();
-                IntPtr outMemBufPtr = IntPtr.Zero;
-                var retError = new Error();
-
                 var push = new Push
                 {
                     Route = route,
@@ -280,28 +279,21 @@ namespace NPitaya
                     Data = ByteString.CopyFrom(SerializerUtils.SerializeOrRaw(pushMsg, _serializer))
                 };
 
-                try
+                var data = push.ToByteArray();
+                fixed (byte* p = data)
                 {
-                    var data = push.ToByteArray();
-                    fixed (byte* p = data)
+                    IntPtr pushBuffer = pitaya_buffer_new((IntPtr)p, data.Length);
+                    IntPtr err = pitaya_send_push_to_user(pitaya, frontendId, serverKind, pushBuffer);
+                    pitaya_buffer_drop(pushBuffer);
+                    if (err != IntPtr.Zero)
                     {
-                        inMemBuf.data = (IntPtr) p;
-                        inMemBuf.size = data.Length;
-                        IntPtr inMemBufPtr = new StructWrapper(inMemBuf);
-
-                        // err = PushInternal(frontendId, serverType, inMemBufPtr, out outMemBufPtr);
-                        // if (err != IntPtr.Zero) // error
-                        {
-                            // Logger.Error($"Push failed: ({retError.code}: {retError.msg})");
-                            return false;
-                        }
-
-                        return true;
+                        var pitayaError = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
+                        pitaya_error_drop(err);
+                        Logger.Error($"Push failed: ({pitayaError.Code}: {pitayaError.Message})");
+                        return false;
                     }
-                }
-                finally
-                {
-                    // if (outMemBufPtr != null) FreeMemoryBufferInternal(outMemBufPtr);
+
+                    return true;
                 }
             });
         }
@@ -321,7 +313,7 @@ namespace NPitaya
                     {
                         var pitayaError = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
                         pitaya_error_drop(err);
-                        Logger.Error($"Push failed: ({pitayaError.Code}: {pitayaError.Message})");
+                        Logger.Error($"Kick failed: ({pitayaError.Code}: {pitayaError.Message})");
                         return false;
                     }
 

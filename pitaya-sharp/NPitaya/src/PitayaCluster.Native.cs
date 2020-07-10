@@ -102,5 +102,16 @@ namespace NPitaya
             string serverKind,
             IntPtr kickBuffer,
             out IntPtr kickAnswer);
+
+        //
+        // Push
+        //
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr pitaya_send_push_to_user(
+            IntPtr pitaya,
+            string serverId,
+            string serverKind,
+            IntPtr pushBuffer);
     }
+
 }
