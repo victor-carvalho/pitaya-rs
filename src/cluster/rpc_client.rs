@@ -12,6 +12,12 @@ pub trait RpcClient {
         server_kind: &ServerKind,
         kick_msg: protos::KickMsg,
     ) -> Result<protos::KickAnswer, Error>;
+    fn push_to_user(
+        &self,
+        server_id: &ServerId,
+        server_kind: &ServerKind,
+        push_msg: protos::Push,
+    ) -> Result<(), Error>;
 }
 
 pub struct Config {
@@ -109,13 +115,43 @@ impl RpcClient for NatsClient {
         let topic = utils::user_kick_topic(&kick_msg.user_id, server_kind);
         let kick_buffer = utils::encode_proto(&kick_msg);
 
-        // TODO(lhahn): should we handle the returned message here somehow?
         let message = connection
             .request_timeout(&topic, kick_buffer, self.config.request_timeout)
             .map_err(|e| Error::Nats(e))?;
 
         let kick_answer = Message::decode(&message.data[..]).map_err(|e| Error::InvalidProto(e))?;
         Ok(kick_answer)
+    }
+
+    fn push_to_user(
+        &self,
+        // NOTE: we ignore the server id, since it is not necessary to create the topic.
+        _server_id: &ServerId,
+        server_kind: &ServerKind,
+        push_msg: protos::Push,
+    ) -> Result<(), Error> {
+        trace!(self.logger, "NatsClient::push_to_user");
+        let connection = self
+            .connection
+            .as_ref()
+            .ok_or(Error::NatsConnectionNotOpen)?;
+        if push_msg.uid.is_empty() {
+            return Err(Error::InvalidUserId);
+        }
+
+        if server_kind.0.is_empty() {
+            return Err(Error::InvalidServerKind);
+        }
+
+        let topic = utils::user_messages_topic(&push_msg.uid, server_kind);
+        let push_buffer = utils::encode_proto(&push_msg);
+
+        // TODO(lhahn): should we handle the returned message here somehow?
+        let _message = connection
+            .request_timeout(&topic, push_buffer, self.config.request_timeout)
+            .map_err(|e| Error::Nats(e))?;
+
+        Ok(())
     }
 }
 
