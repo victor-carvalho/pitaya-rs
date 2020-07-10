@@ -19,7 +19,6 @@ namespace NPitaya
 {
     public partial class PitayaCluster
     {
-        // private static readonly int ProcessorsCount = Environment.ProcessorCount;
         private static ISerializer _serializer = new ProtobufSerializer();
         public delegate string RemoteNameFunc(string methodName);
         private delegate void OnSignalFunc();
@@ -178,9 +177,9 @@ namespace NPitaya
 
             if (err != IntPtr.Zero)
             {
-                // TODO(lhahn): convert error
+                var pitayaError = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
                 pitaya_error_drop(err);
-                throw new PitayaException("Initialization failed");
+                throw new PitayaException($"Initialization failed: code={pitayaError.Code} msg={pitayaError.Message}");
             }
         }
 
@@ -243,6 +242,11 @@ namespace NPitaya
         public static void SetSerializer(ISerializer s)
         {
             _serializer = s;
+        }
+
+        public static void WaitShutdownSignal()
+        {
+            pitaya_wait_shutdown_signal(pitaya);
         }
 
         public static void Terminate()

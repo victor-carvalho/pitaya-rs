@@ -34,12 +34,14 @@ namespace NPitaya
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern void pitaya_shutdown(IntPtr pitaya);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern unsafe IntPtr pitaya_send_rpc(
+        private static extern IntPtr pitaya_send_rpc(
             IntPtr pitaya,
             string serverId,
             string route,
             IntPtr req,
             out IntPtr res);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void pitaya_wait_shutdown_signal(IntPtr pitaya);
 
         //
         // Error

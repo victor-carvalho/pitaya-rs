@@ -58,15 +58,6 @@ namespace PitayaCSharpExample
     //   var prometheusMR = new PrometheusMetricsReporter("default", "game", 9090);
     //   MetricsReporters.AddMetricReporter(prometheusMR);
 
-    //   PitayaCluster.AddSignalHandler(() =>
-    //   {
-    //     Logger.Info("Calling terminate on cluster");
-    //     PitayaCluster.Terminate();
-    //     Logger.Info("Cluster terminated, exiting app");
-    //     Environment.Exit(1);
-    //     //Environment.FailFast("oops");
-    //   });
-
       try
       {
           PitayaCluster.Initialize(
@@ -100,6 +91,15 @@ namespace PitayaCSharpExample
         Logger.Error("Failed to create cluster: {0}", exc.Message);
         Environment.Exit(1);
       }
+
+      new Thread(() => {
+        Console.WriteLine("Waiting shutdown signal...");
+        PitayaCluster.WaitShutdownSignal();
+        Console.WriteLine("Done waiting...");
+        PitayaCluster.Terminate();
+        Environment.Exit(1);
+        // Environment.FailFast("oops");
+      }).Start();
 
       Logger.Info("pitaya lib initialized successfully :)");
 
