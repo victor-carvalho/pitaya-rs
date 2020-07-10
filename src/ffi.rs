@@ -458,7 +458,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
 #[no_mangle]
 pub extern "C" fn pitaya_wait_shutdown_signal(pitaya_server: *mut Pitaya) {
     assert!(!pitaya_server.is_null());
-    let mut pitaya_server = unsafe { Box::from_raw(pitaya_server) };
+    let mut pitaya_server = unsafe { mem::ManuallyDrop::new(Box::from_raw(pitaya_server)) };
     let logger = pitaya_server.pitaya_server.logger.clone();
 
     let mut rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
@@ -469,9 +469,6 @@ pub extern "C" fn pitaya_wait_shutdown_signal(pitaya_server: *mut Pitaya) {
             });
         });
     }
-
-    // We don't want to deallocate the pitaya server.
-    let _ = Box::into_raw(pitaya_server);
 }
 
 #[no_mangle]
@@ -571,6 +568,7 @@ pub extern "C" fn pitaya_send_kick(
     assert!(!server_id.is_null());
     assert!(!server_kind.is_null());
     assert!(!kick_buffer.is_null());
+    assert!(!kick_answer.is_null());
 
     let mut pitaya_server = unsafe { mem::ManuallyDrop::new(Box::from_raw(pitaya_server)) };
     let kick_buffer = unsafe { mem::ManuallyDrop::new(Box::from_raw(kick_buffer)) };
@@ -601,6 +599,45 @@ pub extern "C" fn pitaya_send_kick(
         Err(e) => Box::into_raw(Box::new(PitayaError {
             code: "PIT-500".to_owned(),
             message: format!("failed to send kick: {}", e),
+        })),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_send_push_to_user(
+    pitaya_server: *mut Pitaya,
+    server_id: *mut c_char,
+    server_kind: *mut c_char,
+    push_buffer: *mut PitayaBuffer,
+) -> *mut PitayaError {
+    assert!(!pitaya_server.is_null());
+    assert!(!server_id.is_null());
+    assert!(!server_kind.is_null());
+    assert!(!push_buffer.is_null());
+
+    let mut pitaya_server = unsafe { mem::ManuallyDrop::new(Box::from_raw(pitaya_server)) };
+    let push_buffer = unsafe { mem::ManuallyDrop::new(Box::from_raw(push_buffer)) };
+    let server_id = ServerId::from(unsafe { CStr::from_ptr(server_id).to_string_lossy() });
+    let server_kind = ServerKind::from(unsafe { CStr::from_ptr(server_kind).to_string_lossy() });
+
+    let push_msg: protos::Push = match Message::decode(push_buffer.data.as_ref()) {
+        Ok(m) => m,
+        Err(e) => {
+            return Box::into_raw(Box::new(PitayaError {
+                code: "PIT-400".to_owned(),
+                message: format!("invalid push buffer: {}", e),
+            }));
+        }
+    };
+
+    match pitaya_server
+        .pitaya_server
+        .send_push_to_user(&server_id, &server_kind, push_msg)
+    {
+        Ok(_) => std::ptr::null_mut(),
+        Err(e) => Box::into_raw(Box::new(PitayaError {
+            code: "PIT-500".to_owned(),
+            message: format!("failed to send push: {}", e),
         })),
     }
 }
