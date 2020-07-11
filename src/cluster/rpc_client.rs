@@ -18,10 +18,10 @@ pub trait RpcClient {
         server_kind: ServerKind,
         kick_msg: protos::KickMsg,
     ) -> Result<protos::KickAnswer, Error>;
-    fn push_to_user(
+    async fn push_to_user(
         &self,
-        server_id: &ServerId,
-        server_kind: &ServerKind,
+        server_id: ServerId,
+        server_kind: ServerKind,
         push_msg: protos::Push,
     ) -> Result<(), Error>;
 }
@@ -152,17 +152,18 @@ impl RpcClient for NatsClient {
         Ok(kick_answer)
     }
 
-    fn push_to_user(
+    async fn push_to_user(
         &self,
         // NOTE: we ignore the server id, since it is not necessary to create the topic.
-        _server_id: &ServerId,
-        server_kind: &ServerKind,
+        _server_id: ServerId,
+        server_kind: ServerKind,
         push_msg: protos::Push,
     ) -> Result<(), Error> {
         trace!(self.logger, "NatsClient::push_to_user");
         let connection = self
             .connection
             .as_ref()
+            .cloned()
             .ok_or(Error::NatsConnectionNotOpen)?;
         if push_msg.uid.is_empty() {
             return Err(Error::InvalidUserId);
@@ -172,13 +173,19 @@ impl RpcClient for NatsClient {
             return Err(Error::InvalidServerKind);
         }
 
-        let topic = utils::user_messages_topic(&push_msg.uid, server_kind);
-        let push_buffer = utils::encode_proto(&push_msg);
+        let request_timeout = self.config.request_timeout.clone();
+        tokio::task::spawn_blocking(move || -> Result<(), Error> {
+            let topic = utils::user_messages_topic(&push_msg.uid, &server_kind);
+            let push_buffer = utils::encode_proto(&push_msg);
 
-        // TODO(lhahn): should we handle the returned message here somehow?
-        let _message = connection
-            .request_timeout(&topic, push_buffer, self.config.request_timeout)
-            .map_err(|e| Error::Nats(e))?;
+            // TODO(lhahn): should we handle the returned message here somehow?
+            let _message = connection
+                .request_timeout(&topic, push_buffer, request_timeout)
+                .map_err(|e| Error::Nats(e))?;
+
+            Ok(())
+        })
+        .await??;
 
         Ok(())
     }

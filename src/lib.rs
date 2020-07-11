@@ -234,14 +234,15 @@ impl Pitaya {
             .await
     }
 
-    pub fn send_push_to_user(
+    pub async fn send_push_to_user(
         &mut self,
-        server_id: &ServerId,
-        server_kind: &ServerKind,
+        server_id: ServerId,
+        server_kind: ServerKind,
         push_msg: protos::Push,
     ) -> Result<(), Error> {
         self.nats_rpc_client
             .push_to_user(server_id, server_kind, push_msg)
+            .await
     }
 
     async fn start<RpcHandler>(

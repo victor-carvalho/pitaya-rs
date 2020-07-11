@@ -114,28 +114,28 @@ namespace NPitaya.Models
             return PitayaCluster.Rpc<Response>(_frontendId, Route.FromString(route), sessionProto.ToByteArray());
         }
 
-        public Task<bool> Push(object pushMsg, string route)
+        public Task Push(object pushMsg, string route)
         {
             return PitayaCluster.SendPushToUser(_frontendId, "", route, Uid, pushMsg);
         }
-        public Task<bool> Push(object pushMsg, string svType, string route)
+        public Task Push(object pushMsg, string svType, string route)
         {
             return PitayaCluster.SendPushToUser("", svType, route, Uid, pushMsg);
         }
 
-        public Task<bool> Push(object pushMsg, string svType, string svId, string route)
+        public Task Push(object pushMsg, string svType, string svId, string route)
         {
             return PitayaCluster.SendPushToUser(svId, svType, route, Uid, pushMsg);
         }
 
-        public Task<bool> Kick()
+        public Task Kick()
         {
             return PitayaCluster.SendKickToUser(_frontendId, "", new KickMsg
             {
                 UserId = Uid
             });
         }
-        public Task<bool> Kick(string svType)
+        public Task Kick(string svType)
         {
             return PitayaCluster.SendKickToUser("", svType, new KickMsg
             {

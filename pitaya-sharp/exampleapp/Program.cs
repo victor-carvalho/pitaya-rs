@@ -118,11 +118,11 @@ namespace PitayaCSharpExample
         Logger.Info("Sending RPC....");
         try
         {
-            // var res = await PitayaCluster.Rpc<NPitaya.Protos.MyResponse>(Route.FromString("csharp.testRemote.remote"), new NPitaya.Protos.RPCMsg {
-                // Route = "random.route.man",
-                // Msg = "HEY",
-            // });
-            var res = await PitayaCluster.Rpc<NPitaya.Protos.MyResponse>(Route.FromString("room.room.join"), null);
+            var res = await PitayaCluster.Rpc<NPitaya.Protos.MyResponse>(Route.FromString("csharp.testRemote.remote"), new NPitaya.Protos.RPCMsg {
+                Route = "random.route.man",
+                Msg = "HEY",
+            });
+            // var res = await PitayaCluster.Rpc<NPitaya.Protos.MyResponse>(Route.FromString("room.room.join"), null);
             Console.WriteLine("GOT MESSAGE!!!");
             Console.WriteLine($"Code: {res.Code}");
             Console.WriteLine($"Msg: {res.Msg}");

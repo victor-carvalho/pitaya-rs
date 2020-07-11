@@ -94,10 +94,12 @@ void pitaya_send_kick(Pitaya *p,
                       void (*callback)(void*, PitayaError*, PitayaBuffer*),
                       void *user_data);
 
-PitayaError *pitaya_send_push_to_user(Pitaya *pitaya_server,
-                                      char *server_id,
-                                      char *server_kind,
-                                      PitayaBuffer *push_buffer);
+void pitaya_send_push_to_user(Pitaya *p,
+                              char *server_id,
+                              char *server_kind,
+                              PitayaBuffer *push_buffer,
+                              void (*callback)(void*, PitayaError*),
+                              void *user_data);
 
 void pitaya_send_rpc(Pitaya *p,
                      char *server_id,

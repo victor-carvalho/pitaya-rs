@@ -8,6 +8,8 @@ namespace NPitaya
         private delegate void ServerAddedOrRemoved(int serverAdded, IntPtr server, IntPtr user);
         private delegate void SendRpcCallback(IntPtr userData, IntPtr err, IntPtr response);
         private delegate void ServerByIdCallback(IntPtr userData, IntPtr server);
+        private delegate void SendKickCallback(IntPtr userData, IntPtr err, IntPtr kickAnswerBuffer);
+        private delegate void SendPushCallback(IntPtr userData, IntPtr err);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void HandleRpcCallbackFunc(IntPtr userData, IntPtr rpc);
@@ -111,7 +113,8 @@ namespace NPitaya
             string serverId,
             string serverKind,
             IntPtr kickBuffer,
-            out IntPtr kickAnswer);
+            SendKickCallback callback,
+            IntPtr userData);
 
         //
         // Push
@@ -121,7 +124,9 @@ namespace NPitaya
             IntPtr pitaya,
             string serverId,
             string serverKind,
-            IntPtr pushBuffer);
+            IntPtr pushBuffer,
+            SendPushCallback callback,
+            IntPtr userData);
     }
 
 }

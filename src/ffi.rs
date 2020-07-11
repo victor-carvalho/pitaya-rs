@@ -541,12 +541,11 @@ pub extern "C" fn pitaya_send_rpc(
             Ok(r) => r,
             Err(e) => {
                 error!(logger, "failed to convert route"; "error" => %e);
-                let err = Box::into_raw(Box::new(PitayaError {
+                let mut err = Box::new(PitayaError {
                     code: "PIT-500".to_owned(),
                     message: format!("rpc error: {}", e),
-                }));
-                callback(user_data.0, err, null_mut());
-                let _ = unsafe { Box::from_raw(err) };
+                });
+                callback(user_data.0, &mut *err as *mut PitayaError, null_mut());
                 return;
             }
         };
@@ -567,25 +566,22 @@ pub extern "C" fn pitaya_send_rpc(
             Ok(r) => r,
             Err(e) => {
                 error!(logger, "RPC failed");
-                let err = Box::into_raw(Box::new(PitayaError {
+                let mut err = Box::new(PitayaError {
                     code: "PIT-500".to_owned(),
                     message: format!("rpc error: {}", e),
-                }));
-                callback(user_data.0, err, null_mut());
-                let _ = unsafe { Box::from_raw(err) };
+                });
+                callback(user_data.0, &mut *err as *mut PitayaError, null_mut());
                 return;
             }
         };
 
         // We don't drop response buffer because we'll pass it to the C code.
         let response_data = utils::encode_proto(&res);
-        let res = Box::into_raw(Box::new(PitayaBuffer {
+        let mut res = Box::new(PitayaBuffer {
             data: response_data,
-        }));
+        });
 
-        callback(user_data.0, null_mut(), res);
-
-        let _ = unsafe { Box::from_raw(res) };
+        callback(user_data.0, null_mut(), &mut *res as *mut PitayaBuffer);
     });
 }
 
@@ -604,7 +600,7 @@ pub extern "C" fn pitaya_send_kick(
     assert!(!kick_buffer.is_null());
 
     let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
-    let kick_buffer = unsafe { mem::ManuallyDrop::new(Box::from_raw(kick_buffer)) };
+    let kick_buffer = unsafe { Box::from_raw(kick_buffer) };
     let server_id = ServerId::from(unsafe { CStr::from_ptr(server_id).to_string_lossy() });
     let server_kind = ServerKind::from(unsafe { CStr::from_ptr(server_kind).to_string_lossy() });
     let user_data = PitayaUserData(user_data);
@@ -614,12 +610,11 @@ pub extern "C" fn pitaya_send_kick(
         let kick_msg: protos::KickMsg = match Message::decode(kick_buffer.data.as_ref()) {
             Ok(m) => m,
             Err(e) => {
-                let err = Box::into_raw(Box::new(PitayaError {
+                let mut err = Box::new(PitayaError {
                     code: "PIT-400".to_owned(),
                     message: format!("invalid kick buffer: {}", e),
-                }));
-                callback(user_data.0, err, null_mut());
-                let _ = unsafe { Box::from_raw(err) };
+                });
+                callback(user_data.0, &mut *err as *mut PitayaError, null_mut());
                 return;
             }
         };
@@ -630,17 +625,19 @@ pub extern "C" fn pitaya_send_kick(
         {
             Ok(answer) => {
                 let buffer = utils::encode_proto(&answer);
-                let kick_answer = Box::into_raw(Box::new(PitayaBuffer { data: buffer }));
-                callback(user_data.0, null_mut(), kick_answer);
-                let _ = unsafe { Box::from_raw(kick_answer) };
+                let mut kick_answer = Box::new(PitayaBuffer { data: buffer });
+                callback(
+                    user_data.0,
+                    null_mut(),
+                    &mut *kick_answer as *mut PitayaBuffer,
+                );
             }
             Err(e) => {
-                let err = Box::into_raw(Box::new(PitayaError {
+                let mut err = Box::new(PitayaError {
                     code: "PIT-500".to_owned(),
                     message: format!("failed to send kick: {}", e),
-                }));
-                callback(user_data.0, err, null_mut());
-                let _ = unsafe { Box::from_raw(err) };
+                });
+                callback(user_data.0, &mut *err as *mut PitayaError, null_mut());
             }
         }
     });
@@ -648,39 +645,52 @@ pub extern "C" fn pitaya_send_kick(
 
 #[no_mangle]
 pub extern "C" fn pitaya_send_push_to_user(
-    pitaya_server: *mut Pitaya,
+    p: *mut Pitaya,
     server_id: *mut c_char,
     server_kind: *mut c_char,
     push_buffer: *mut PitayaBuffer,
-) -> *mut PitayaError {
-    assert!(!pitaya_server.is_null());
+    callback: extern "C" fn(*mut c_void, *mut PitayaError),
+    user_data: *mut c_void,
+) {
+    assert!(!p.is_null());
     assert!(!server_id.is_null());
     assert!(!server_kind.is_null());
     assert!(!push_buffer.is_null());
 
-    let mut pitaya_server = unsafe { mem::ManuallyDrop::new(Box::from_raw(pitaya_server)) };
+    let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
     let push_buffer = unsafe { mem::ManuallyDrop::new(Box::from_raw(push_buffer)) };
     let server_id = ServerId::from(unsafe { CStr::from_ptr(server_id).to_string_lossy() });
     let server_kind = ServerKind::from(unsafe { CStr::from_ptr(server_kind).to_string_lossy() });
+    let user_data = PitayaUserData(user_data);
 
-    let push_msg: protos::Push = match Message::decode(push_buffer.data.as_ref()) {
-        Ok(m) => m,
-        Err(e) => {
-            return Box::into_raw(Box::new(PitayaError {
-                code: "PIT-400".to_owned(),
-                message: format!("invalid push buffer: {}", e),
-            }));
+    let mut pitaya_server = p.pitaya_server.clone();
+    p.runtime.spawn(async move {
+        let push_msg: protos::Push = match Message::decode(push_buffer.data.as_ref()) {
+            Ok(m) => m,
+            Err(e) => {
+                let mut err = Box::new(PitayaError {
+                    code: "PIT-400".to_owned(),
+                    message: format!("invalid push buffer: {}", e),
+                });
+                callback(user_data.0, &mut *err as *mut PitayaError);
+                return;
+            }
+        };
+
+        match pitaya_server
+            .send_push_to_user(server_id, server_kind, push_msg)
+            .await
+        {
+            Ok(_) => {
+                callback(user_data.0, null_mut());
+            }
+            Err(e) => {
+                let mut err = Box::new(PitayaError {
+                    code: "PIT-500".to_owned(),
+                    message: format!("failed to send push: {}", e),
+                });
+                callback(user_data.0, &mut *err as *mut PitayaError);
+            }
         }
-    };
-
-    match pitaya_server
-        .pitaya_server
-        .send_push_to_user(&server_id, &server_kind, push_msg)
-    {
-        Ok(_) => null_mut(),
-        Err(e) => Box::into_raw(Box::new(PitayaError {
-            code: "PIT-500".to_owned(),
-            message: format!("failed to send push: {}", e),
-        })),
-    }
+    });
 }

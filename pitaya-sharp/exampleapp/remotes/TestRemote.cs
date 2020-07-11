@@ -10,7 +10,7 @@ namespace exampleapp.remotes
         {
             var response = new NPitaya.Protos.MyResponse
             {
-                Msg = $"hello from csharp :) {System.Guid.NewGuid().ToString()}, route={msg.Route}, msg={msg.Msg}",
+                Msg = $"[REMOTE] hello from csharp :) {System.Guid.NewGuid().ToString()}, route={msg.Route}, msg={msg.Msg}",
                 Code = 200,
             };
             return response;

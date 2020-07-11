@@ -46,18 +46,25 @@ namespace exampleapp.Handlers
         {
             Console.WriteLine("got empty notify");
             var msg = Encoding.UTF8.GetBytes("test felipe");
-            var ok = await pitayaSession.Push(new MyResponse{Code = 200, Msg = "testFelipe"}, "test.route");
-            if (!ok)
+
+            try
             {
-                Logger.Error("push to user failed!");
+                await pitayaSession.Push(new MyResponse{Code = 200, Msg = "testFelipe"}, "test.route");
+            }
+            catch (Exception e)
+            {
+                Logger.Error($"push to user failed!: {e}", e);
             }
         }
         public async Task TestKick(PitayaSession pitayaSession)
         {
-            var ok = await pitayaSession.Kick();
-            if (!ok)
+            try
             {
-                Logger.Error("kick user failed!");
+                await pitayaSession.Kick();
+            }
+            catch (Exception e)
+            {
+                Logger.Error($"kick user failed! {e}");
             }
         }
 

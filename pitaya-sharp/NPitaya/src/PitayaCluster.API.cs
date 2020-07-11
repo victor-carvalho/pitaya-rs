@@ -296,7 +296,22 @@ namespace NPitaya
             });
         }
 
-        public static unsafe Task<bool> SendPushToUser(
+        private static void PushCallback(IntPtr userData, IntPtr err)
+        {
+            var handle = GCHandle.FromIntPtr(userData);
+            var t = (TaskCompletionSource<bool>)handle.Target;
+
+            if (err != IntPtr.Zero)
+            {
+                var pe = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
+                t.SetException(new Exception($"Push failed: code={pe.Code}, message={pe.Message}"));
+                return;
+            }
+
+            t.SetResult(true);
+        }
+
+        public static Task SendPushToUser(
             string frontendId,
             string serverKind,
             string route,
@@ -305,6 +320,9 @@ namespace NPitaya
         {
             return Task.Run(() =>
             {
+                var t = new TaskCompletionSource<bool>();
+                var del = new SendPushCallback(PushCallback);
+                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
                 var push = new Push
                 {
                     Route = route,
@@ -312,53 +330,66 @@ namespace NPitaya
                     Data = ByteString.CopyFrom(SerializerUtils.SerializeOrRaw(pushMsg, _serializer))
                 };
 
-                var data = push.ToByteArray();
-                fixed (byte* p = data)
+                unsafe
                 {
-                    IntPtr pushBuffer = pitaya_buffer_new((IntPtr)p, data.Length);
-                    IntPtr err = pitaya_send_push_to_user(pitaya, frontendId, serverKind, pushBuffer);
-                    pitaya_buffer_drop(pushBuffer);
-                    if (err != IntPtr.Zero)
+                    var data = push.ToByteArray();
+                    fixed (byte* p = data)
                     {
-                        var pitayaError = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
-                        pitaya_error_drop(err);
-                        Logger.Error($"Push failed: ({pitayaError.Code}: {pitayaError.Message})");
-                        return false;
+                        IntPtr pushBuffer = pitaya_buffer_new((IntPtr)p, data.Length);
+                        pitaya_send_push_to_user(pitaya, frontendId, serverKind, pushBuffer, del, GCHandle.ToIntPtr(handle));
                     }
-
-                    return true;
                 }
+
+                return t.Task;
             });
         }
 
-        public static unsafe Task<bool> SendKickToUser(string frontendId, string serverKind, KickMsg kick)
+        private static void KickCallback(IntPtr userData, IntPtr err, IntPtr kickAnswerBuf)
+        {
+            var handle = GCHandle.FromIntPtr(userData);
+            var t = (TaskCompletionSource<bool>)handle.Target;
+
+            if (err != IntPtr.Zero)
+            {
+                var pe = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
+                t.SetException(new Exception($"Kick failed: code={pe.Code} message={pe.Message}"));
+                return;
+            }
+
+            Int32 len;
+            IntPtr resData = pitaya_buffer_data(kickAnswerBuf, out len);
+
+            var kickAnswer = new KickAnswer();
+            kickAnswer.MergeFrom(new CodedInputStream(GetDataFromRawPointer(resData, len)));
+
+            if (!kickAnswer.Kicked)
+            {
+                t.SetException(new Exception($"Kick failed: received kicked=false from server"));
+                return;
+            }
+
+            t.SetResult(true);
+        }
+
+        public static Task SendKickToUser(string frontendId, string serverKind, KickMsg kick)
         {
             return Task.Run(() =>
             {
-                var data = kick.ToByteArray();
-                fixed (byte* p = data)
+                var t = new TaskCompletionSource<bool>();
+                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
+                var del = new SendKickCallback(KickCallback);
+
+                unsafe
                 {
-                    IntPtr kickAnswerPtr = IntPtr.Zero;
-                    IntPtr kickBuffer = pitaya_buffer_new((IntPtr)p, data.Length);
-                    IntPtr err = pitaya_send_kick(pitaya, frontendId, serverKind, kickBuffer, out kickAnswerPtr);
-                    pitaya_buffer_drop(kickBuffer);
-                    if (err != IntPtr.Zero)
+                    var data = kick.ToByteArray();
+                    fixed (byte* p = data)
                     {
-                        var pitayaError = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
-                        pitaya_error_drop(err);
-                        Logger.Error($"Kick failed: ({pitayaError.Code}: {pitayaError.Message})");
-                        return false;
+                        IntPtr kickBuffer = pitaya_buffer_new((IntPtr)p, data.Length);
+                        pitaya_send_kick(pitaya, frontendId, serverKind, kickBuffer, del, GCHandle.ToIntPtr(handle));
                     }
-
-                    Int32 len;
-                    IntPtr resData = pitaya_buffer_data(kickAnswerPtr, out len);
-
-                    var kickAnswer = new KickAnswer();
-                    kickAnswer.MergeFrom(new CodedInputStream(GetDataFromRawPointer(resData, len)));
-
-                    pitaya_buffer_drop(kickAnswerPtr);
-                    return kickAnswer.Kicked;
                 }
+
+                return t.Task;
             });
         }
 
@@ -380,7 +411,7 @@ namespace NPitaya
             t.SetResult(response);
         }
 
-        public static unsafe Task<T> Rpc<T>(string serverId, Route route, object msg)
+        public static Task<T> Rpc<T>(string serverId, Route route, object msg)
         {
             return Task.Run(() =>
             {
@@ -388,11 +419,14 @@ namespace NPitaya
                 var t = new TaskCompletionSource<T>();
                 var handle = GCHandle.Alloc(t, GCHandleType.Normal);
 
-                var data = SerializerUtils.SerializeOrRaw(msg, _serializer);
-                fixed (byte* p = data)
+                unsafe
                 {
-                    IntPtr request = pitaya_buffer_new((IntPtr)p, data.Length);
-                    pitaya_send_rpc(pitaya, serverId, route.ToString(), request, callback, GCHandle.ToIntPtr(handle));
+                    var data = SerializerUtils.SerializeOrRaw(msg, _serializer);
+                    fixed (byte* p = data)
+                    {
+                        IntPtr request = pitaya_buffer_new((IntPtr)p, data.Length);
+                        pitaya_send_rpc(pitaya, serverId, route.ToString(), request, callback, GCHandle.ToIntPtr(handle));
+                    }
                 }
 
                 return t.Task;
