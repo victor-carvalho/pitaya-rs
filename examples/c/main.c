@@ -16,6 +16,8 @@
 #include "request.pb.c"
 #include "response.pb.c"
 
+#include <unistd.h>
+
 static bool
 write_string(pb_ostream_t *stream, const pb_field_t *field, void * const *arg)
 {
@@ -62,10 +64,45 @@ handle_rpc(void *data, PitayaRpc *rpc)
 }
 
 static void
-on_cluster_notification(void *userData, PitayaClusterNotification notification, PitayaServer *server)
+on_cluster_notification(void *user_data, PitayaClusterNotification notification, PitayaServer *server)
 {
     printf("====> received notification: %d\n", notification);
     pitaya_server_drop(server);
+}
+
+static void
+send_rpc_callback(void *userData, PitayaError *err, PitayaBuffer *response)
+{
+    if (err) {
+        printf("ERROR ON RPC: code=%s, message=%s\n", pitaya_error_code(err), pitaya_error_message(err));
+        return;
+    }
+
+    printf("RPC successful\n");
+
+    protos_Response protos_response = protos_Response_init_zero;
+    protos_response.data.funcs.decode = read_string;
+    protos_response.error.code.funcs.decode = read_string;
+    protos_response.error.msg.funcs.decode = read_string;
+    protos_response.error.metadata.funcs.decode = read_string;
+
+    int32_t len;
+    const uint8_t *data = pitaya_buffer_data(response, &len);
+
+    pb_istream_t stream = pb_istream_from_buffer(data, len);
+    assert(pb_decode(&stream, protos_Response_fields, &protos_response));
+
+    printf("Received response from server: %s\n", (char*)protos_response.data.arg);
+}
+
+static void
+server_by_id_callback(void *user_data, PitayaServer *server)
+{
+    if (server) {
+        printf("Server was found!: id=%s\n", pitaya_server_id(server));
+    } else {
+        printf("Server was NOT found!\n");
+    }
 }
 
 int main()
@@ -134,41 +171,19 @@ int main()
     PitayaBuffer *request = pitaya_buffer_new(request_data, stream.bytes_written);
     PitayaBuffer *response = NULL;
 
-    err = pitaya_send_rpc(pitaya, "", "my-server-kind-from-c.room.join", request, &response);
-
-    pitaya_buffer_drop(request);
-    if (err) {
-        printf("ERROR ON RPC: code=%s, message=%s\n", pitaya_error_code(err), pitaya_error_message(err));
-        pitaya_error_drop(err);
-    } else {
-        printf("RPC successful\n");
-
-        protos_Response protos_response = protos_Response_init_zero;
-        protos_response.data.funcs.decode = read_string;
-        protos_response.error.code.funcs.decode = read_string;
-        protos_response.error.msg.funcs.decode = read_string;
-        protos_response.error.metadata.funcs.decode = read_string;
-
-        int32_t len;
-        const uint8_t *data = pitaya_buffer_data(response, &len);
-
-        pb_istream_t stream = pb_istream_from_buffer(data, len);
-        assert(pb_decode(&stream, protos_Response_fields, &protos_response));
-
-        printf("Received response from server: %s\n", (char*)protos_response.data.arg);
-        pitaya_buffer_drop(response);
-    }
+    pitaya_send_rpc(
+        pitaya,
+        "",
+        "my-server-kind-from-c.room.join",
+        request,
+        send_rpc_callback,
+        NULL
+    );
 
     printf("Getting server by id...\n");
-    PitayaServer *found_server;
-    int ok = pitaya_server_by_id(pitaya, "server_id", "server_kind", &found_server);
-    if (ok) {
-        printf("Server was found!\n");
-    } else {
-        printf("Server was NOT found!\n");
-    }
+    pitaya_server_by_id(pitaya, "server_id", "server_kind", server_by_id_callback, NULL);
 
-    pitaya_server_drop(server);
+    sleep(5);
 
     pitaya_wait_shutdown_signal(pitaya);
 

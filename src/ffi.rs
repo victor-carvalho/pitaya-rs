@@ -249,8 +249,8 @@ pub extern "C" fn pitaya_server_by_id(
     p: *mut Pitaya,
     server_id: *mut c_char,
     server_kind: *mut c_char,
-    user_data: *mut c_void,
     callback: extern "C" fn(*mut c_void, *mut PitayaServer),
+    user_data: *mut c_void,
 ) {
     let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
     let logger = p.pitaya_server.logger.clone();
@@ -278,7 +278,9 @@ pub extern "C" fn pitaya_server_by_id(
             .await
         {
             Ok(Some(sv)) => {
-                callback(user_data.0, Box::into_raw(Box::new(PitayaServer::new(sv))));
+                let sv = Box::into_raw(Box::new(PitayaServer::new(sv)));
+                callback(user_data.0, sv);
+                let _ = unsafe { Box::from_raw(sv) };
             }
             Ok(None) => {
                 callback(user_data.0, null_mut());
@@ -501,8 +503,8 @@ pub extern "C" fn pitaya_send_rpc(
     server_id: *mut c_char,
     route_str: *mut c_char,
     request_buffer: *mut PitayaBuffer,
-    user_data: *mut c_void,
     callback: extern "C" fn(*mut c_void, *mut PitayaError, *mut PitayaBuffer),
+    user_data: *mut c_void,
 ) {
     assert!(!request_buffer.is_null());
     assert!(!p.is_null());
@@ -518,7 +520,7 @@ pub extern "C" fn pitaya_send_rpc(
     let logger = p.pitaya_server.logger();
 
     let route_str = unsafe { CStr::from_ptr(route_str).to_string_lossy() };
-    let request_buffer = unsafe { mem::ManuallyDrop::new(Box::from_raw(request_buffer)) };
+    let request_buffer = unsafe { Box::from_raw(request_buffer) };
 
     let request = protos::Request {
         r#type: protos::RpcType::User as i32,
@@ -540,7 +542,12 @@ pub extern "C" fn pitaya_send_rpc(
             Ok(r) => r,
             Err(e) => {
                 error!(logger, "failed to convert route"; "error" => %e);
-                callback(user_data.0, null_mut(), null_mut());
+                let err = Box::into_raw(Box::new(PitayaError {
+                    code: "PIT-500".to_owned(),
+                    message: format!("rpc error: {}", e),
+                }));
+                callback(user_data.0, err, null_mut());
+                let _ = unsafe { Box::from_raw(err) };
                 return;
             }
         };
@@ -561,28 +568,25 @@ pub extern "C" fn pitaya_send_rpc(
             Ok(r) => r,
             Err(e) => {
                 error!(logger, "RPC failed");
-                callback(
-                    user_data.0,
-                    Box::into_raw(Box::new(PitayaError {
-                        code: "PIT-500".to_owned(),
-                        message: format!("rpc error: {}", e),
-                    })),
-                    null_mut(),
-                );
+                let err = Box::into_raw(Box::new(PitayaError {
+                    code: "PIT-500".to_owned(),
+                    message: format!("rpc error: {}", e),
+                }));
+                callback(user_data.0, err, null_mut());
+                let _ = unsafe { Box::from_raw(err) };
                 return;
             }
         };
 
         // We don't drop response buffer because we'll pass it to the C code.
         let response_data = utils::encode_proto(&res);
+        let res = Box::into_raw(Box::new(PitayaBuffer {
+            data: response_data,
+        }));
 
-        callback(
-            user_data.0,
-            null_mut(),
-            Box::into_raw(Box::new(PitayaBuffer {
-                data: response_data,
-            })),
-        );
+        callback(user_data.0, null_mut(), res);
+
+        let _ = unsafe { Box::from_raw(res) };
     });
 }
 
