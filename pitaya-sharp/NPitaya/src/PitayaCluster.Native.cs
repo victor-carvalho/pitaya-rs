@@ -6,6 +6,8 @@ namespace NPitaya
     public partial class PitayaCluster
     {
         private delegate void ServerAddedOrRemoved(int serverAdded, IntPtr server, IntPtr user);
+        private delegate void SendRpcCallback(IntPtr userData, IntPtr err, IntPtr response);
+        private delegate void ServerByIdCallback(IntPtr userData, IntPtr server);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void HandleRpcCallbackFunc(IntPtr userData, IntPtr rpc);
@@ -39,7 +41,8 @@ namespace NPitaya
             string serverId,
             string route,
             IntPtr req,
-            out IntPtr res);
+            SendRpcCallback callback,
+            IntPtr userData);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern void pitaya_wait_shutdown_signal(IntPtr pitaya);
 
@@ -67,7 +70,12 @@ namespace NPitaya
         // Server
         //
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern bool pitaya_server_by_id(IntPtr pitaya, string serverId, string serverKind, ref IntPtr server);
+        private static extern bool pitaya_server_by_id(
+            IntPtr pitaya,
+            string serverId,
+            string serverKind,
+            ServerByIdCallback callback1,
+            IntPtr userData);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr pitaya_server_new(string id, string kind, string metadata, string hostname, Int32 frontend);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]

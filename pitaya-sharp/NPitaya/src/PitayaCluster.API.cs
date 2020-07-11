@@ -255,16 +255,45 @@ namespace NPitaya
             MetricsReporters.Terminate();
         }
 
-        public static Server GetServerById(string serverId, string serverKind)
+        class ServerIdContext
         {
-            IntPtr serverHandle = IntPtr.Zero;
-            bool ok = pitaya_server_by_id(pitaya, serverId, serverKind, ref serverHandle);
-            if (!ok)
+            public TaskCompletionSource<Server> t;
+            public string serverId;
+        }
+
+        private static void GetServerByIdCallback(IntPtr userData, IntPtr serverHandle)
+        {
+            var handle = GCHandle.FromIntPtr(userData);
+            var context = (ServerIdContext)handle.Target;
+
+            if (serverHandle == IntPtr.Zero)
             {
-                Logger.Error($"There are no servers with id {serverId}");
-                return null;
+                Logger.Error($"There are no servers with id {context.serverId}");
+                context.t.TrySetResult(null);
+                return;
             }
-            return new Server(serverHandle);
+
+            var sv = new Server(serverHandle);
+            context.t.TrySetResult(sv);
+        }
+
+        public static Task<Server> GetServerById(string serverId, string serverKind)
+        {
+            return Task.Run(() =>
+            {
+                var context = new ServerIdContext
+                {
+                    t = new TaskCompletionSource<Server>(),
+                    serverId = serverId,
+                };
+
+                var handle = GCHandle.Alloc(context, GCHandleType.Normal);
+                var callback = new ServerByIdCallback(GetServerByIdCallback);
+
+                pitaya_server_by_id(pitaya, serverId, serverKind, callback, GCHandle.ToIntPtr(handle));
+
+                return context.t.Task;
+            });
         }
 
         public static unsafe Task<bool> SendPushToUser(
@@ -333,34 +362,40 @@ namespace NPitaya
             });
         }
 
+        private static void RpcCallback<T>(IntPtr userData, IntPtr err, IntPtr responseBuf)
+        {
+            var handle = GCHandle.FromIntPtr(userData);
+            var t = (TaskCompletionSource<T>)handle.Target;
+
+            if (err != IntPtr.Zero)
+            {
+                var pitayaError = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
+                t.SetException(new PitayaException($"RPC call failed: ({pitayaError.Code}: {pitayaError.Message})"));
+                return;
+            }
+
+            Int32 len;
+            IntPtr resData = pitaya_buffer_data(responseBuf, out len);
+            T response = GetProtoMessageFromBuffer<T>(GetDataFromRawPointer(resData, len));
+            t.SetResult(response);
+        }
+
         public static unsafe Task<T> Rpc<T>(string serverId, Route route, object msg)
         {
             return Task.Run(() =>
             {
-                IntPtr rpcResponse;
-                IntPtr err = IntPtr.Zero;
+                var callback = new SendRpcCallback(RpcCallback<T>);
+                var t = new TaskCompletionSource<T>();
+                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
 
                 var data = SerializerUtils.SerializeOrRaw(msg, _serializer);
                 fixed (byte* p = data)
                 {
                     IntPtr request = pitaya_buffer_new((IntPtr)p, data.Length);
-                    err = pitaya_send_rpc(pitaya, serverId, route.ToString(), request, out rpcResponse);
-                    pitaya_buffer_drop(request);
+                    pitaya_send_rpc(pitaya, serverId, route.ToString(), request, callback, GCHandle.ToIntPtr(handle));
                 }
 
-                if (err != IntPtr.Zero)
-                {
-                    var pitayaError = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
-                    pitaya_error_drop(err);
-                    throw new PitayaException($"RPC call failed: ({pitayaError.Code}: {pitayaError.Message})");
-                }
-
-                Int32 len;
-                IntPtr resData = pitaya_buffer_data(rpcResponse, out len);
-
-                T response = GetProtoMessageFromBuffer<T>(GetDataFromRawPointer(resData, len));
-                pitaya_buffer_drop(rpcResponse);
-                return response;
+                return t.Task;
             });
         }
 
