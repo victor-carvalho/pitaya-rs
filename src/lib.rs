@@ -223,14 +223,15 @@ impl Pitaya {
         }
     }
 
-    pub fn send_kick(
+    pub async fn send_kick(
         &mut self,
-        server_id: &ServerId,
-        server_kind: &ServerKind,
+        server_id: ServerId,
+        server_kind: ServerKind,
         kick_msg: protos::KickMsg,
     ) -> Result<protos::KickAnswer, Error> {
         self.nats_rpc_client
             .kick_user(server_id, server_kind, kick_msg)
+            .await
     }
 
     pub fn send_push_to_user(

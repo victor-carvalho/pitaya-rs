@@ -12,10 +12,10 @@ pub trait RpcClient {
         target: Arc<Server>,
         req: protos::Request,
     ) -> Result<protos::Response, Error>;
-    fn kick_user(
+    async fn kick_user(
         &self,
-        server_id: &ServerId,
-        server_kind: &ServerKind,
+        server_id: ServerId,
+        server_kind: ServerKind,
         kick_msg: protos::KickMsg,
     ) -> Result<protos::KickAnswer, Error>;
     fn push_to_user(
@@ -112,16 +112,17 @@ impl RpcClient for NatsClient {
         Ok(response)
     }
 
-    fn kick_user(
+    async fn kick_user(
         &self,
-        _server_id: &ServerId,
-        server_kind: &ServerKind,
+        _server_id: ServerId,
+        server_kind: ServerKind,
         kick_msg: protos::KickMsg,
     ) -> Result<protos::KickAnswer, Error> {
         trace!(self.logger, "NatsClient::kick_user");
         let connection = self
             .connection
             .as_ref()
+            .cloned()
             .ok_or(Error::NatsConnectionNotOpen)?;
         // NOTE: Ignore server_id, since it is not necessary to create the topic.
         if kick_msg.user_id.is_empty() {
@@ -132,14 +133,22 @@ impl RpcClient for NatsClient {
             return Err(Error::InvalidServerKind);
         }
 
-        let topic = utils::user_kick_topic(&kick_msg.user_id, server_kind);
-        let kick_buffer = utils::encode_proto(&kick_msg);
+        let request_timeout = self.config.request_timeout.clone();
+        let kick_answer =
+            tokio::task::spawn_blocking(move || -> Result<protos::KickAnswer, Error> {
+                let topic = utils::user_kick_topic(&kick_msg.user_id, &server_kind);
+                let kick_buffer = utils::encode_proto(&kick_msg);
 
-        let message = connection
-            .request_timeout(&topic, kick_buffer, self.config.request_timeout)
-            .map_err(|e| Error::Nats(e))?;
+                let message = connection
+                    .request_timeout(&topic, kick_buffer, request_timeout)
+                    .map_err(|e| Error::Nats(e))?;
 
-        let kick_answer = Message::decode(&message.data[..]).map_err(|e| Error::InvalidProto(e))?;
+                let k: protos::KickAnswer =
+                    Message::decode(&message.data[..]).map_err(|e| Error::InvalidProto(e))?;
+                Ok(k)
+            })
+            .await??;
+
         Ok(kick_answer)
     }
 

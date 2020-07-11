@@ -591,49 +591,59 @@ pub extern "C" fn pitaya_send_rpc(
 
 #[no_mangle]
 pub extern "C" fn pitaya_send_kick(
-    pitaya_server: *mut Pitaya,
+    p: *mut Pitaya,
     server_id: *mut c_char,
     server_kind: *mut c_char,
     kick_buffer: *mut PitayaBuffer,
-    kick_answer: *mut *mut PitayaBuffer,
-) -> *mut PitayaError {
-    assert!(!pitaya_server.is_null());
+    callback: extern "C" fn(*mut c_void, *mut PitayaError, *mut PitayaBuffer),
+    user_data: *mut c_void,
+) {
+    assert!(!p.is_null());
     assert!(!server_id.is_null());
     assert!(!server_kind.is_null());
     assert!(!kick_buffer.is_null());
-    assert!(!kick_answer.is_null());
 
-    let mut pitaya_server = unsafe { mem::ManuallyDrop::new(Box::from_raw(pitaya_server)) };
+    let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
     let kick_buffer = unsafe { mem::ManuallyDrop::new(Box::from_raw(kick_buffer)) };
     let server_id = ServerId::from(unsafe { CStr::from_ptr(server_id).to_string_lossy() });
     let server_kind = ServerKind::from(unsafe { CStr::from_ptr(server_kind).to_string_lossy() });
+    let user_data = PitayaUserData(user_data);
 
-    let kick_msg: protos::KickMsg = match Message::decode(kick_buffer.data.as_ref()) {
-        Ok(m) => m,
-        Err(e) => {
-            return Box::into_raw(Box::new(PitayaError {
-                code: "PIT-400".to_owned(),
-                message: format!("invalid kick buffer: {}", e),
-            }));
-        }
-    };
-
-    match pitaya_server
-        .pitaya_server
-        .send_kick(&server_id, &server_kind, kick_msg)
-    {
-        Ok(answer) => {
-            let buffer = utils::encode_proto(&answer);
-            unsafe {
-                *kick_answer = Box::into_raw(Box::new(PitayaBuffer { data: buffer }));
+    let mut pitaya_server = p.pitaya_server.clone();
+    p.runtime.spawn(async move {
+        let kick_msg: protos::KickMsg = match Message::decode(kick_buffer.data.as_ref()) {
+            Ok(m) => m,
+            Err(e) => {
+                let err = Box::into_raw(Box::new(PitayaError {
+                    code: "PIT-400".to_owned(),
+                    message: format!("invalid kick buffer: {}", e),
+                }));
+                callback(user_data.0, err, null_mut());
+                let _ = unsafe { Box::from_raw(err) };
+                return;
             }
-            null_mut()
+        };
+
+        match pitaya_server
+            .send_kick(server_id, server_kind, kick_msg)
+            .await
+        {
+            Ok(answer) => {
+                let buffer = utils::encode_proto(&answer);
+                let kick_answer = Box::into_raw(Box::new(PitayaBuffer { data: buffer }));
+                callback(user_data.0, null_mut(), kick_answer);
+                let _ = unsafe { Box::from_raw(kick_answer) };
+            }
+            Err(e) => {
+                let err = Box::into_raw(Box::new(PitayaError {
+                    code: "PIT-500".to_owned(),
+                    message: format!("failed to send kick: {}", e),
+                }));
+                callback(user_data.0, err, null_mut());
+                let _ = unsafe { Box::from_raw(err) };
+            }
         }
-        Err(e) => Box::into_raw(Box::new(PitayaError {
-            code: "PIT-500".to_owned(),
-            message: format!("failed to send kick: {}", e),
-        })),
-    }
+    });
 }
 
 #[no_mangle]
