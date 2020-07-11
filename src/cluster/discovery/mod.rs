@@ -355,72 +355,10 @@ mod test {
         })
     }
 
-    #[test]
-    fn sd_can_be_create() -> Result<(), Box<dyn StdError>> {
-        let mut rt = tokio::runtime::Runtime::new()?;
+    #[tokio::test]
+    async fn sd_can_be_create() -> Result<(), Box<dyn StdError>> {
         let server = new_server();
-        let _sd = rt.block_on(async move {
-            EtcdLazy::new(
-                test_helpers::get_root_logger(),
-                server,
-                EtcdConfig {
-                    prefix: "pitaya".to_owned(),
-                    url: ETCD_URL.to_owned(),
-                    lease_ttl: Duration::from_secs(60),
-                },
-            )
-            .await
-        })?;
-        Ok(())
-    }
-
-    #[test]
-    #[should_panic]
-    fn sd_can_fail_creation() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let server = new_server();
-        let _sd = rt
-            .block_on(async move {
-                EtcdLazy::new(
-                    test_helpers::get_root_logger(),
-                    server,
-                    EtcdConfig {
-                        prefix: "pitaya".to_owned(),
-                        url: INVALID_ETCD_URL.to_owned(),
-                        lease_ttl: Duration::from_secs(60),
-                    },
-                )
-                .await
-            })
-            .unwrap();
-    }
-
-    #[test]
-    fn cache_empty_on_start() -> Result<(), Box<dyn StdError>> {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let server = new_server();
-        let sd = rt.block_on(async move {
-            EtcdLazy::new(
-                test_helpers::get_root_logger(),
-                server,
-                EtcdConfig {
-                    prefix: "pitaya".to_owned(),
-                    url: ETCD_URL.to_owned(),
-                    lease_ttl: Duration::from_secs(60),
-                },
-            )
-            .await
-        })?;
-        assert_eq!(sd.servers_cache.read().unwrap().servers_by_id.len(), 0);
-        assert_eq!(sd.servers_cache.read().unwrap().servers_by_kind.len(), 0);
-        Ok(())
-    }
-
-    async fn server_by_id_main(
-        server_id: &ServerId,
-    ) -> Result<(EtcdLazy, Option<Arc<Server>>), Box<dyn StdError>> {
-        let server = new_server();
-        let mut sd = EtcdLazy::new(
+        let _sd = EtcdLazy::new(
             test_helpers::get_root_logger(),
             server,
             EtcdConfig {
@@ -430,16 +368,60 @@ mod test {
             },
         )
         .await?;
-        let maybe_server = sd
-            .server_by_id(server_id, &ServerKind::from("room"))
-            .await?;
-        Ok((sd, maybe_server))
+        Ok(())
     }
 
-    #[test]
-    fn server_by_id_works() -> Result<(), Box<dyn StdError>> {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let (sd, server) = rt.block_on(server_by_id_main(&ServerId::from("random-id")))?;
+    #[tokio::test]
+    #[should_panic]
+    async fn sd_can_fail_creation() {
+        let server = new_server();
+        let _sd = EtcdLazy::new(
+            test_helpers::get_root_logger(),
+            server,
+            EtcdConfig {
+                prefix: "pitaya".to_owned(),
+                url: INVALID_ETCD_URL.to_owned(),
+                lease_ttl: Duration::from_secs(60),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cache_empty_on_start() -> Result<(), Box<dyn StdError>> {
+        let server = new_server();
+        let sd = EtcdLazy::new(
+            test_helpers::get_root_logger(),
+            server,
+            EtcdConfig {
+                prefix: "pitaya".to_owned(),
+                url: ETCD_URL.to_owned(),
+                lease_ttl: Duration::from_secs(60),
+            },
+        )
+        .await?;
+        assert_eq!(sd.servers_cache.read().unwrap().servers_by_id.len(), 0);
+        assert_eq!(sd.servers_cache.read().unwrap().servers_by_kind.len(), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn server_by_id_works() -> Result<(), Box<dyn StdError>> {
+        let mut sd = EtcdLazy::new(
+            test_helpers::get_root_logger(),
+            new_server(),
+            EtcdConfig {
+                prefix: "pitaya".to_owned(),
+                url: ETCD_URL.to_owned(),
+                lease_ttl: Duration::from_secs(60),
+            },
+        )
+        .await?;
+
+        let server = sd
+            .server_by_id(&ServerId::from("random-id"), &ServerKind::from("room"))
+            .await?;
         assert!(server.is_none());
         assert_eq!(sd.servers_cache.read().unwrap().servers_by_id.len(), 1);
 
@@ -448,7 +430,9 @@ mod test {
             server_id = Some(id.clone());
         }
 
-        let (sd, server) = rt.block_on(server_by_id_main(server_id.as_ref().unwrap()))?;
+        let server = sd
+            .server_by_id(server_id.as_ref().unwrap(), &ServerKind::from("room"))
+            .await?;
 
         assert!(server.is_some());
         assert_eq!(sd.servers_cache.read().unwrap().servers_by_id.len(), 1);
@@ -467,137 +451,118 @@ mod test {
         Ok(())
     }
 
-    #[test]
-    fn server_by_kind_works() -> Result<(), Box<dyn StdError>> {
-        async fn test(server_kind: &ServerKind) -> Result<(EtcdLazy, Vec<Arc<Server>>), Error> {
-            let server = new_server();
-            let mut sd = EtcdLazy::new(
-                test_helpers::get_root_logger(),
-                server,
-                EtcdConfig {
-                    prefix: "pitaya".to_owned(),
-                    url: ETCD_URL.to_owned(),
-                    lease_ttl: Duration::from_secs(60),
-                },
-            )
-            .await?;
-            let maybe_servers = sd.servers_by_kind(server_kind).await?;
-            Ok((sd, maybe_servers))
-        }
+    #[tokio::test]
+    async fn server_by_kind_works() -> Result<(), Box<dyn StdError>> {
+        let mut sd = EtcdLazy::new(
+            test_helpers::get_root_logger(),
+            new_server(),
+            EtcdConfig {
+                prefix: "pitaya".to_owned(),
+                url: ETCD_URL.to_owned(),
+                lease_ttl: Duration::from_secs(60),
+            },
+        )
+        .await?;
 
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let (_, servers) = rt.block_on(test(&ServerKind::from("room")))?;
+        let servers = sd.servers_by_kind(&ServerKind::from("room")).await?;
         assert_eq!(servers.len(), 1);
 
-        let (_, servers) = rt.block_on(test(&ServerKind::from("room2")))?;
+        let servers = sd.servers_by_kind(&ServerKind::from("room2")).await?;
         assert_eq!(servers.len(), 0);
 
         Ok(())
     }
 
-    #[test]
-    fn server_lease_works() -> Result<(), Box<dyn StdError>> {
-        async fn lease_test() -> Result<(), Box<dyn StdError>> {
-            let server = new_server();
-            let (app_die_sender, _app_die_recv) = mpsc::channel(10);
+    #[tokio::test]
+    async fn server_lease_works() -> Result<(), Box<dyn StdError>> {
+        let server = new_server();
+        let (app_die_sender, _app_die_recv) = mpsc::channel(10);
 
-            let mut sd = EtcdLazy::new(
-                test_helpers::get_root_logger(),
-                server,
-                EtcdConfig {
-                    prefix: "pitaya".to_owned(),
-                    url: ETCD_URL.to_owned(),
-                    lease_ttl: Duration::from_secs(60),
-                },
-            )
-            .await?;
+        let mut sd = EtcdLazy::new(
+            test_helpers::get_root_logger(),
+            server,
+            EtcdConfig {
+                prefix: "pitaya".to_owned(),
+                url: ETCD_URL.to_owned(),
+                lease_ttl: Duration::from_secs(60),
+            },
+        )
+        .await?;
 
-            sd.start(app_die_sender).await?;
-            assert!(sd.lease_id.is_some());
-            assert!(sd.keep_alive_task.is_some());
-            sd.stop().await?;
-            Ok(())
-        }
-
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let _ = rt.block_on(lease_test())?;
-
+        sd.start(app_die_sender).await?;
+        assert!(sd.lease_id.is_some());
+        assert!(sd.keep_alive_task.is_some());
+        sd.stop().await?;
         Ok(())
     }
 
-    #[test]
-    fn server_watch_works() -> Result<(), Box<dyn StdError>> {
-        async fn test() -> Result<(), Box<dyn StdError>> {
-            let server = new_server();
-            let mut sd = EtcdLazy::new(
-                test_helpers::get_root_logger(),
-                server,
-                EtcdConfig {
-                    prefix: "pitaya".to_owned(),
-                    url: ETCD_URL.to_owned(),
-                    lease_ttl: Duration::from_secs(60),
-                },
-            )
-            .await?;
+    #[tokio::test]
+    async fn server_watch_works() -> Result<(), Box<dyn StdError>> {
+        let server = new_server();
+        let mut sd = EtcdLazy::new(
+            test_helpers::get_root_logger(),
+            server,
+            EtcdConfig {
+                prefix: "pitaya".to_owned(),
+                url: ETCD_URL.to_owned(),
+                lease_ttl: Duration::from_secs(60),
+            },
+        )
+        .await?;
 
-            let mut subscribe_chan = sd.subscribe();
+        let mut subscribe_chan = sd.subscribe();
 
-            let (app_die_sender, _app_die_recv) = mpsc::channel(10);
-            sd.start(app_die_sender).await?;
+        let (app_die_sender, _app_die_recv) = mpsc::channel(10);
+        sd.start(app_die_sender).await?;
 
-            let servers_added = Arc::new(RwLock::new(Vec::new()));
-            let servers_removed = Arc::new(RwLock::new(Vec::new()));
+        let servers_added = Arc::new(RwLock::new(Vec::new()));
+        let servers_removed = Arc::new(RwLock::new(Vec::new()));
 
-            let task_servers_added = servers_added.clone();
-            let task_servers_removed = servers_removed.clone();
-            tokio::spawn(async move {
-                loop {
-                    match subscribe_chan.recv().await {
-                        Ok(Notification::ServerAdded(sv)) => {
-                            task_servers_added.write().unwrap().push(sv);
-                        }
-                        Ok(Notification::ServerRemoved(sv)) => {
-                            task_servers_removed.write().unwrap().push(sv);
-                        }
-                        Err(_) => {
-                            return;
-                        }
+        let task_servers_added = servers_added.clone();
+        let task_servers_removed = servers_removed.clone();
+        tokio::spawn(async move {
+            loop {
+                match subscribe_chan.recv().await {
+                    Ok(Notification::ServerAdded(sv)) => {
+                        task_servers_added.write().unwrap().push(sv);
+                    }
+                    Ok(Notification::ServerRemoved(sv)) => {
+                        task_servers_removed.write().unwrap().push(sv);
+                    }
+                    Err(_) => {
+                        return;
                     }
                 }
-            });
+            }
+        });
 
-            // Wait a little bit, otherwise we'll have a rece condition reading both
-            // RwLocks below.
-            tokio::time::delay_for(Duration::from_millis(50)).await;
+        // Wait a little bit, otherwise we'll have a rece condition reading both
+        // RwLocks below.
+        tokio::time::delay_for(Duration::from_millis(50)).await;
 
-            assert_eq!(servers_added.read().unwrap().len(), 0);
-            assert_eq!(servers_removed.read().unwrap().len(), 0);
+        assert_eq!(servers_added.read().unwrap().len(), 0);
+        assert_eq!(servers_removed.read().unwrap().len(), 0);
 
-            let servers = sd
-                .servers_by_kind(&ServerKind::from("unknown-kind"))
-                .await?;
+        let servers = sd
+            .servers_by_kind(&ServerKind::from("unknown-kind"))
+            .await?;
 
-            assert!(servers.is_empty());
-            assert_eq!(servers_added.read().unwrap().len(), 0);
-            assert_eq!(servers_removed.read().unwrap().len(), 0);
+        assert!(servers.is_empty());
+        assert_eq!(servers_added.read().unwrap().len(), 0);
+        assert_eq!(servers_removed.read().unwrap().len(), 0);
 
-            let servers = sd.servers_by_kind(&ServerKind::from("room")).await?;
+        let servers = sd.servers_by_kind(&ServerKind::from("room")).await?;
 
-            // Wait a little bit, otherwise we'll have a rece condition reading both
-            // RwLocks below.
-            tokio::time::delay_for(Duration::from_millis(50)).await;
+        // Wait a little bit, otherwise we'll have a rece condition reading both
+        // RwLocks below.
+        tokio::time::delay_for(Duration::from_millis(50)).await;
 
-            assert_eq!(servers.len(), 1);
-            assert_eq!(servers_added.read().unwrap().len(), 1);
-            assert_eq!(servers_removed.read().unwrap().len(), 0);
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers_added.read().unwrap().len(), 1);
+        assert_eq!(servers_removed.read().unwrap().len(), 0);
 
-            sd.stop().await?;
+        sd.stop().await?;
 
-            Ok(())
-        }
-
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let _ = rt.block_on(test())?;
         Ok(())
     }
 }

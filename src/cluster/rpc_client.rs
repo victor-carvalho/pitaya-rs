@@ -1,11 +1,17 @@
 use crate::{error::Error, protos, utils, Server, ServerId, ServerKind};
+use async_trait::async_trait;
 use prost::Message;
 use slog::trace;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[async_trait]
 pub trait RpcClient {
-    fn call(&self, target: Arc<Server>, req: protos::Request) -> Result<protos::Response, Error>;
+    async fn call(
+        &self,
+        target: Arc<Server>,
+        req: protos::Request,
+    ) -> Result<protos::Response, Error>;
     fn kick_user(
         &self,
         server_id: &ServerId,
@@ -40,18 +46,19 @@ impl Default for Config {
     }
 }
 
+#[derive(Clone)]
 pub struct NatsClient {
-    config: Config,
+    config: Arc<Config>,
     connection: Option<nats::Connection>,
     logger: slog::Logger,
 }
 
 impl NatsClient {
-    pub fn new(logger: slog::Logger, config: Config) -> Self {
+    pub fn new(logger: slog::Logger, config: Arc<Config>) -> Self {
         Self {
-            config: config,
+            config,
             connection: None,
-            logger: logger,
+            logger,
         }
     }
 
@@ -69,12 +76,18 @@ impl NatsClient {
     }
 }
 
+#[async_trait]
 impl RpcClient for NatsClient {
-    fn call(&self, target: Arc<Server>, req: protos::Request) -> Result<protos::Response, Error> {
+    async fn call(
+        &self,
+        target: Arc<Server>,
+        req: protos::Request,
+    ) -> Result<protos::Response, Error> {
         trace!(self.logger, "NatsClient::call");
         let connection = self
             .connection
             .as_ref()
+            .map(|conn| conn.clone())
             .ok_or(Error::NatsConnectionNotOpen)?;
         let topic = utils::topic_for_server(&target);
         let buffer = utils::encode_proto(&req);
@@ -83,11 +96,18 @@ impl RpcClient for NatsClient {
             self.logger,
             "sending nats request"; "topic" => &topic, "timeout" => self.config.request_timeout.as_secs()
         );
-        let message = connection
-            .request_timeout(&topic, buffer, self.config.request_timeout)
-            .map_err(|e| Error::Nats(e))?;
 
-        let response = Message::decode(message.data.as_ref())?;
+        let request_timeout = self.config.request_timeout.clone();
+
+        // We do a spawn_blocking here, since it otherwise will block the executor thread.
+        let response = tokio::task::spawn_blocking(move || -> Result<protos::Response, Error> {
+            let message = connection
+                .request_timeout(&topic, buffer, request_timeout)
+                .map_err(|e| Error::Nats(e))?;
+            let msg: protos::Response = Message::decode(message.data.as_ref())?;
+            Ok(msg)
+        })
+        .await??;
 
         Ok(response)
     }
@@ -169,10 +189,10 @@ mod tests {
     fn nats_rpc_client_can_be_created() {
         let _client = NatsClient::new(
             test_helpers::get_root_logger(),
-            Config {
+            Arc::new(Config {
                 address: "https://sfdjsdoifj".to_owned(),
                 ..Config::default()
-            },
+            }),
         );
     }
 
@@ -181,23 +201,23 @@ mod tests {
     fn nats_fails_connection() {
         let mut client = NatsClient::new(
             test_helpers::get_root_logger(),
-            Config {
+            Arc::new(Config {
                 address: "https://nats-io.server:3241".to_owned(),
                 ..Config::default()
-            },
+            }),
         );
         client.connect().unwrap();
         client.close();
     }
 
-    #[test]
-    fn nats_request_timeout() -> Result<(), Error> {
+    #[tokio::test]
+    async fn nats_request_timeout() -> Result<(), Error> {
         let mut client = NatsClient::new(
             test_helpers::get_root_logger(),
-            Config {
+            Arc::new(Config {
                 request_timeout: Duration::from_millis(300),
                 ..Config::default()
-            },
+            }),
         );
         client.connect()?;
 
@@ -209,21 +229,23 @@ mod tests {
             frontend: false,
         });
 
-        let response = client.call(
-            target_server,
-            protos::Request {
-                r#type: protos::RpcType::User as i32,
-                msg: Some(protos::Msg {
-                    r#type: protos::MsgType::MsgRequest as i32,
-                    data: vec![],
-                    route: "".to_owned(),
-                    ..protos::Msg::default()
-                }),
-                frontend_id: "".to_owned(),
-                metadata: Vec::new(),
-                ..protos::Request::default()
-            },
-        );
+        let response = client
+            .call(
+                target_server,
+                protos::Request {
+                    r#type: protos::RpcType::User as i32,
+                    msg: Some(protos::Msg {
+                        r#type: protos::MsgType::MsgRequest as i32,
+                        data: vec![],
+                        route: "".to_owned(),
+                        ..protos::Msg::default()
+                    }),
+                    frontend_id: "".to_owned(),
+                    metadata: Vec::new(),
+                    ..protos::Request::default()
+                },
+            )
+            .await;
 
         assert!(response.is_err());
         let err = response.unwrap_err();
@@ -239,8 +261,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn nats_request_works() -> Result<(), Box<dyn StdError>> {
+    #[tokio::test]
+    async fn nats_request_works() -> Result<(), Box<dyn StdError>> {
         async fn start_service_disovery() -> Result<EtcdLazy, etcd_client::Error> {
             let sv = Arc::new(Server {
                 id: ServerId::from("1234567"),
@@ -261,24 +283,21 @@ mod tests {
             .await
         }
 
-        let mut rt = tokio::runtime::Runtime::new()?;
-        let mut service_discovery = rt.block_on(start_service_disovery())?;
+        let mut service_discovery = start_service_disovery().await?;
 
         let mut client = NatsClient::new(
             test_helpers::get_root_logger(),
-            Config {
+            Arc::new(Config {
                 request_timeout: Duration::from_millis(300),
                 ..Config::default()
-            },
+            }),
         );
         client.connect()?;
 
-        let servers_by_kind = rt.block_on(async {
-            service_discovery
-                .servers_by_kind(&ServerKind::from("room"))
-                .await
-                .unwrap()
-        });
+        let servers_by_kind = service_discovery
+            .servers_by_kind(&ServerKind::from("room"))
+            .await
+            .unwrap();
 
         assert_eq!(servers_by_kind.len(), 1);
 
@@ -287,21 +306,23 @@ mod tests {
             "content": "how are you?"
         }"#;
 
-        let response = client.call(
-            servers_by_kind[0].clone(),
-            protos::Request {
-                r#type: protos::RpcType::User as i32,
-                msg: Some(protos::Msg {
-                    r#type: protos::MsgType::MsgRequest as i32,
-                    data: rpc_data.as_bytes().to_owned(),
-                    route: "room.join".to_owned(),
-                    ..protos::Msg::default()
-                }),
-                frontend_id: "".to_owned(),
-                metadata: "{}".as_bytes().to_owned(),
-                ..protos::Request::default()
-            },
-        )?;
+        let response = client
+            .call(
+                servers_by_kind[0].clone(),
+                protos::Request {
+                    r#type: protos::RpcType::User as i32,
+                    msg: Some(protos::Msg {
+                        r#type: protos::MsgType::MsgRequest as i32,
+                        data: rpc_data.as_bytes().to_owned(),
+                        route: "room.join".to_owned(),
+                        ..protos::Msg::default()
+                    }),
+                    frontend_id: "".to_owned(),
+                    metadata: "{}".as_bytes().to_owned(),
+                    ..protos::Request::default()
+                },
+            )
+            .await?;
 
         assert!(response.error.is_none());
 

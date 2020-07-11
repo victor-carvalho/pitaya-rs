@@ -10,6 +10,7 @@ use std::{
     ffi::{c_void, CStr, CString},
     mem,
     os::raw::c_char,
+    ptr::null_mut,
     slice,
     sync::{Arc, Mutex},
     time,
@@ -33,6 +34,11 @@ pub extern "C" fn pitaya_error_message(err: *mut PitayaError) -> *const c_char {
     let err = unsafe { mem::ManuallyDrop::new(Box::from_raw(err)) };
     let code = err.message.as_ptr();
     code as *const c_char
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_error_drop(error: *mut PitayaError) {
+    let _ = unsafe { Box::from_raw(error) };
 }
 
 //
@@ -235,56 +241,54 @@ struct PitayaUserData(*mut c_void);
 pub struct Pitaya {
     pitaya_server: crate::Pitaya,
     shutdown_receiver: Option<oneshot::Receiver<()>>,
+    runtime: tokio::runtime::Runtime,
 }
 
 #[no_mangle]
 pub extern "C" fn pitaya_server_by_id(
-    pitaya_server: *mut Pitaya,
+    p: *mut Pitaya,
     server_id: *mut c_char,
     server_kind: *mut c_char,
-    server: *mut *mut PitayaServer,
-) -> bool {
-    assert!(!server.is_null());
-    assert!(!pitaya_server.is_null());
-    let mut pitaya_server = unsafe { Box::from_raw(pitaya_server) };
-    let logger = pitaya_server.pitaya_server.logger.clone();
+    user_data: *mut c_void,
+    callback: extern "C" fn(*mut c_void, *mut PitayaServer),
+) {
+    let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
+    let logger = p.pitaya_server.logger.clone();
 
     let server_id = unsafe { CStr::from_ptr(server_id) };
     let server_kind = unsafe { CStr::from_ptr(server_kind) };
+
+    let user_data = PitayaUserData(user_data);
 
     let (server_id, server_kind) = match (server_id.to_str(), server_kind.to_str()) {
         (Ok(id), Ok(kind)) => (id, kind),
         _ => {
             error!(logger, "invalid utf8 parameters");
-            let _ = Box::into_raw(pitaya_server);
-            return false;
+            p.runtime.spawn(async move {
+                callback(user_data.0, null_mut());
+            });
+            return;
         }
     };
 
-    let ok = match pitaya_server
-        .pitaya_server
-        .server_by_id(&ServerId::from(server_id), &ServerKind::from(server_kind))
-    {
-        Ok(Some(sv)) => {
-            unsafe {
-                *server = Box::into_raw(Box::new(PitayaServer::new(sv)));
+    let mut pitaya_server = p.pitaya_server.clone();
+    p.runtime.spawn(async move {
+        match pitaya_server
+            .server_by_id(&ServerId::from(server_id), &ServerKind::from(server_kind))
+            .await
+        {
+            Ok(Some(sv)) => {
+                callback(user_data.0, Box::into_raw(Box::new(PitayaServer::new(sv))));
             }
-            true
+            Ok(None) => {
+                callback(user_data.0, null_mut());
+            }
+            Err(e) => {
+                error!(logger, "failed to get server by id"; "error" => %e);
+                callback(user_data.0, null_mut());
+            }
         }
-        Ok(None) => false,
-        Err(e) => {
-            error!(logger, "failed to get server by id"; "error" => %e);
-            false
-        }
-    };
-
-    let _ = Box::into_raw(pitaya_server);
-    ok
-}
-
-#[no_mangle]
-pub extern "C" fn pitaya_error_drop(error: *mut PitayaError) {
-    let _ = unsafe { Box::from_raw(error) };
+    });
 }
 
 #[no_mangle]
@@ -323,7 +327,7 @@ pub extern "C" fn pitaya_rpc_respond(
     let sent = rpc.responder.send(response).map(|_| true).unwrap_or(false);
 
     if sent {
-        std::ptr::null_mut()
+        null_mut()
     } else {
         Box::into_raw(Box::new(PitayaError {
             code: "PIT-500".to_owned(),
@@ -388,62 +392,68 @@ pub extern "C" fn pitaya_initialize_with_nats(
 
     info!(root_logger, "initializing global pitaya server");
 
-    let res = PitayaBuilder::new()
-        .with_server_kind(&server.kind.to_string_lossy())
-        .with_logger(root_logger)
-        .with_rpc_client_config(RpcClientConfig {
-            request_timeout: time::Duration::from_secs(4),
-            ..Default::default()
-        })
-        .with_rpc_server_config(RpcServerConfig {
-            ..Default::default()
-        })
-        .with_etcd_config(EtcdConfig {
-            prefix: String::from("pitaya"),
-            ..EtcdConfig::default()
-        })
-        .with_rpc_handler(move |mut rpc| {
-            info!(
-                rpc_handler_logger,
-                "!!!!!!!! received rpc req: {:?}",
-                rpc.request()
-            );
-            let request_buffer = utils::encode_proto(rpc.request());
-            let rpc = Box::into_raw(Box::new(PitayaRpc {
-                request: request_buffer,
-                responder: rpc.responder(),
-            }));
-            handle_rpc_cb(handle_rpc_data.0, rpc);
-        })
-        .with_cluster_subscriber({
-            move |notification| match notification {
-                cluster::Notification::ServerAdded(server) => {
-                    let raw_server = Box::into_raw(Box::new(PitayaServer::new(server)));
-                    cluster_notification_callback(
-                        cluster_notification_data.0,
-                        PitayaClusterNotification::ServerAdded,
-                        raw_server,
-                    );
+    let mut runtime = tokio::runtime::Runtime::new().expect("should not fail to create a runtime");
+
+    let res = runtime.block_on(async move {
+        PitayaBuilder::new()
+            .with_server_kind(&server.kind.to_string_lossy())
+            .with_logger(root_logger)
+            .with_rpc_client_config(RpcClientConfig {
+                request_timeout: time::Duration::from_secs(4),
+                ..Default::default()
+            })
+            .with_rpc_server_config(RpcServerConfig {
+                ..Default::default()
+            })
+            .with_etcd_config(EtcdConfig {
+                prefix: String::from("pitaya"),
+                ..EtcdConfig::default()
+            })
+            .with_rpc_handler(move |mut rpc| {
+                info!(
+                    rpc_handler_logger,
+                    "!!!!!!!! received rpc req: {:?}",
+                    rpc.request()
+                );
+                let request_buffer = utils::encode_proto(rpc.request());
+                let rpc = Box::into_raw(Box::new(PitayaRpc {
+                    request: request_buffer,
+                    responder: rpc.responder(),
+                }));
+                handle_rpc_cb(handle_rpc_data.0, rpc);
+            })
+            .with_cluster_subscriber({
+                move |notification| match notification {
+                    cluster::Notification::ServerAdded(server) => {
+                        let raw_server = Box::into_raw(Box::new(PitayaServer::new(server)));
+                        cluster_notification_callback(
+                            cluster_notification_data.0,
+                            PitayaClusterNotification::ServerAdded,
+                            raw_server,
+                        );
+                    }
+                    cluster::Notification::ServerRemoved(server) => {
+                        let raw_server = Box::into_raw(Box::new(PitayaServer::new(server)));
+                        cluster_notification_callback(
+                            cluster_notification_data.0,
+                            PitayaClusterNotification::ServerRemoved,
+                            raw_server,
+                        );
+                    }
                 }
-                cluster::Notification::ServerRemoved(server) => {
-                    let raw_server = Box::into_raw(Box::new(PitayaServer::new(server)));
-                    cluster_notification_callback(
-                        cluster_notification_data.0,
-                        PitayaClusterNotification::ServerRemoved,
-                        raw_server,
-                    );
-                }
-            }
-        })
-        .build();
+            })
+            .build()
+            .await
+    });
 
     match res {
         Ok((pitaya_server, shutdown_receiver)) => unsafe {
             (*pitaya) = Box::into_raw(Box::new(Pitaya {
                 pitaya_server,
                 shutdown_receiver: Some(shutdown_receiver),
+                runtime,
             }));
-            std::ptr::null_mut()
+            null_mut()
         },
         Err(e) => {
             error!(logger, "failed to create pitaya server"; "error" => %e);
@@ -472,38 +482,42 @@ pub extern "C" fn pitaya_wait_shutdown_signal(pitaya_server: *mut Pitaya) {
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_shutdown(pitaya_server: *mut Pitaya) {
-    assert!(!pitaya_server.is_null());
-    let pitaya_server = unsafe { Box::from_raw(pitaya_server) };
-    let logger = pitaya_server.pitaya_server.logger.clone();
+pub extern "C" fn pitaya_shutdown(p: *mut Pitaya) {
+    assert!(!p.is_null());
+    let mut p = unsafe { Box::from_raw(p) };
+    let logger = p.pitaya_server.logger.clone();
 
-    if let Err(e) = pitaya_server.pitaya_server.shutdown() {
-        error!(logger, "failed to shutdown pitaya server: {}", e);
-    }
+    let pitaya_server = p.pitaya_server.clone();
+    p.runtime.block_on(async move {
+        if let Err(e) = pitaya_server.shutdown().await {
+            error!(logger, "failed to shutdown pitaya server: {}", e);
+        }
+    });
 }
 
 #[no_mangle]
 pub extern "C" fn pitaya_send_rpc(
-    pitaya_server: *mut Pitaya,
+    p: *mut Pitaya,
     server_id: *mut c_char,
-    route: *mut c_char,
+    route_str: *mut c_char,
     request_buffer: *mut PitayaBuffer,
-    response_buffer: *mut *mut PitayaBuffer,
-) -> *mut PitayaError {
+    user_data: *mut c_void,
+    callback: extern "C" fn(*mut c_void, *mut PitayaError, *mut PitayaBuffer),
+) {
     assert!(!request_buffer.is_null());
-    assert!(!response_buffer.is_null());
-    assert!(!pitaya_server.is_null());
+    assert!(!p.is_null());
 
+    let user_data = PitayaUserData(user_data);
     let server_id = if server_id.is_null() {
         Cow::default()
     } else {
         unsafe { CStr::from_ptr(server_id).to_string_lossy() }
     };
 
-    let mut pitaya_server = unsafe { mem::ManuallyDrop::new(Box::from_raw(pitaya_server)) };
-    let logger = pitaya_server.pitaya_server.logger.clone();
+    let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
+    let logger = p.pitaya_server.logger();
 
-    let route = unsafe { CStr::from_ptr(route).to_string_lossy() };
+    let route_str = unsafe { CStr::from_ptr(route_str).to_string_lossy() };
     let request_buffer = unsafe { mem::ManuallyDrop::new(Box::from_raw(request_buffer)) };
 
     let request = protos::Request {
@@ -511,7 +525,7 @@ pub extern "C" fn pitaya_send_rpc(
         msg: Some(protos::Msg {
             r#type: protos::MsgType::MsgRequest as i32,
             data: request_buffer.data.clone(),
-            route: route.as_ref().to_owned(),
+            route: route_str.as_ref().to_owned(),
             ..protos::Msg::default()
         }),
         // TODO(lhahn): send metadata here or add something relevant (Jaeger?).
@@ -519,41 +533,57 @@ pub extern "C" fn pitaya_send_rpc(
         ..protos::Request::default()
     };
 
-    let result = if server_id.len() > 0 {
-        crate::Route::try_from(route.as_ref()).and_then(|route: crate::Route| {
-            pitaya_server.pitaya_server.send_rpc_to_server(
-                &ServerId::from(server_id.as_ref()),
-                &ServerKind::from(route.server_kind),
-                request,
-            )
-        })
-    } else {
-        pitaya_server
-            .pitaya_server
-            .send_rpc(route.as_ref(), request)
-    };
+    let route_str = route_str.to_string();
+    let mut pitaya_server = p.pitaya_server.clone();
+    p.runtime.spawn(async move {
+        let route = match crate::Route::try_from(route_str.as_ref()) {
+            Ok(r) => r,
+            Err(e) => {
+                error!(logger, "failed to convert route"; "error" => %e);
+                callback(user_data.0, null_mut(), null_mut());
+                return;
+            }
+        };
 
-    let res = match result {
-        Ok(r) => r,
-        Err(e) => {
-            error!(logger, "RPC failed");
-            return Box::into_raw(Box::new(PitayaError {
-                code: "PIT-500".to_owned(),
-                message: format!("rpc error: {}", e),
-            }));
-        }
-    };
+        let result = if server_id.len() > 0 {
+            pitaya_server
+                .send_rpc_to_server(
+                    &ServerId::from(server_id.as_ref()),
+                    &ServerKind::from(route.server_kind),
+                    request,
+                )
+                .await
+        } else {
+            pitaya_server.send_rpc(route_str.as_ref(), request).await
+        };
 
-    // We don't drop response buffer because we'll pass it to the C code.
-    let response_data = utils::encode_proto(&res);
+        let res = match result {
+            Ok(r) => r,
+            Err(e) => {
+                error!(logger, "RPC failed");
+                callback(
+                    user_data.0,
+                    Box::into_raw(Box::new(PitayaError {
+                        code: "PIT-500".to_owned(),
+                        message: format!("rpc error: {}", e),
+                    })),
+                    null_mut(),
+                );
+                return;
+            }
+        };
 
-    unsafe {
-        (*response_buffer) = Box::into_raw(Box::new(PitayaBuffer {
-            data: response_data,
-        }));
-    }
+        // We don't drop response buffer because we'll pass it to the C code.
+        let response_data = utils::encode_proto(&res);
 
-    std::ptr::null_mut()
+        callback(
+            user_data.0,
+            null_mut(),
+            Box::into_raw(Box::new(PitayaBuffer {
+                data: response_data,
+            })),
+        );
+    });
 }
 
 #[no_mangle]
@@ -594,7 +624,7 @@ pub extern "C" fn pitaya_send_kick(
             unsafe {
                 *kick_answer = Box::into_raw(Box::new(PitayaBuffer { data: buffer }));
             }
-            std::ptr::null_mut()
+            null_mut()
         }
         Err(e) => Box::into_raw(Box::new(PitayaError {
             code: "PIT-500".to_owned(),
@@ -634,7 +664,7 @@ pub extern "C" fn pitaya_send_push_to_user(
         .pitaya_server
         .send_push_to_user(&server_id, &server_kind, push_msg)
     {
-        Ok(_) => std::ptr::null_mut(),
+        Ok(_) => null_mut(),
         Err(e) => Box::into_raw(Box::new(PitayaError {
             code: "PIT-500".to_owned(),
             message: format!("failed to send push: {}", e),

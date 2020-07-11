@@ -14,7 +14,8 @@ fn init_logger() -> slog::Logger {
     slog::Logger::root(drain, o!())
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let root_logger = init_logger();
     let logger = root_logger.clone();
 
@@ -54,6 +55,7 @@ fn main() {
             }
         })
         .build()
+        .await
         .expect("failed to start pitaya server");
 
     info!(logger, "sending rpc");
@@ -66,7 +68,7 @@ fn main() {
                 msg: Some(pitaya::protos::Msg {
                     r#type: pitaya::protos::MsgType::MsgRequest as i32,
                     data: "sending some data".as_bytes().to_owned(),
-                    route: "room.room.join".to_owned(),
+                    route: "random-kind.room.join".to_owned(),
                     ..pitaya::protos::Msg::default()
                 }),
                 frontend_id: "".to_owned(),
@@ -74,6 +76,7 @@ fn main() {
                 ..pitaya::protos::Request::default()
             },
         )
+        .await
         .expect("rpc failed");
 
     info!(
@@ -82,11 +85,11 @@ fn main() {
         String::from_utf8_lossy(&res.data)
     );
 
-    let mut rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
-    rt.block_on(async move { shutdown_receiver.await })
-        .expect("failed to await on shutdown receiver");
+    shutdown_receiver
+        .await
+        .expect("failed to wait for shutdown receiver");
 
-    let _ = pitaya_server.shutdown().map_err(|e| {
+    let _ = pitaya_server.shutdown().await.map_err(|e| {
         error!(logger, "failed to shutdown pitaya: {}", e);
     });
 }

@@ -98,16 +98,18 @@ PitayaError *pitaya_send_push_to_user(Pitaya *pitaya_server,
                                       char *server_kind,
                                       PitayaBuffer *push_buffer);
 
-PitayaError *pitaya_send_rpc(Pitaya *pitaya_server,
-                             char *server_id,
-                             char *route,
-                             PitayaBuffer *request_buffer,
-                             PitayaBuffer **response_buffer);
+void pitaya_send_rpc(Pitaya *p,
+                     char *server_id,
+                     char *route_str,
+                     PitayaBuffer *request_buffer,
+                     void *user_data,
+                     void (*callback)(void*, PitayaError*, PitayaBuffer*));
 
-bool pitaya_server_by_id(Pitaya *pitaya_server,
+void pitaya_server_by_id(Pitaya *p,
                          char *server_id,
                          char *server_kind,
-                         PitayaServer **server);
+                         void *user_data,
+                         void (*callback)(void*, PitayaServer*));
 
 void pitaya_server_drop(PitayaServer *pitaya_server);
 
@@ -127,6 +129,6 @@ PitayaServer *pitaya_server_new(char *id,
                                 char *hostname,
                                 int32_t frontend);
 
-void pitaya_shutdown(Pitaya *pitaya_server);
+void pitaya_shutdown(Pitaya *p);
 
 void pitaya_wait_shutdown_signal(Pitaya *pitaya_server);

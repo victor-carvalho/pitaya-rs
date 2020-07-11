@@ -1,7 +1,7 @@
 use crate::{error::Error, protos, utils, Server};
 use async_trait::async_trait;
 use prost::Message;
-use slog::{debug, error, info, o, warn};
+use slog::{debug, error, info, o, trace, warn};
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
@@ -51,31 +51,28 @@ impl Default for Config {
     }
 }
 
+#[derive(Clone)]
 pub struct NatsRpcServer {
-    config: Config,
+    config: Arc<Config>,
     connection: Arc<Mutex<Option<(nats::Connection, nats::subscription::Handler)>>>,
     this_server: Arc<Server>,
-    runtime: Arc<Mutex<tokio::runtime::Runtime>>,
+    runtime_handle: tokio::runtime::Handle,
     logger: slog::Logger,
 }
 
 impl NatsRpcServer {
-    pub fn new(logger: slog::Logger, this_server: Arc<Server>, config: Config) -> Self {
+    pub fn new(
+        logger: slog::Logger,
+        this_server: Arc<Server>,
+        config: Arc<Config>,
+        runtime_handle: tokio::runtime::Handle,
+    ) -> Self {
         Self {
             config,
             this_server,
             logger,
             connection: Arc::new(Mutex::new(None)),
-            runtime: Arc::new(Mutex::new(
-                tokio::runtime::Builder::new()
-                    .threaded_scheduler()
-                    // TODO(lhahn): consider configuring the amount of threads here.
-                    // I only used two initially, since the threads job will be mostly waiting
-                    // returns from RPCs.
-                    .core_threads(2)
-                    .build()
-                    .expect("failed to create the tokio scheduler"),
-            )),
+            runtime_handle,
         }
     }
 
@@ -100,13 +97,19 @@ impl NatsRpcServer {
             info!(self.logger, "rpc server subscribing"; "topic" => &topic);
 
             let sender = rpc_sender;
-            let runtime = self.runtime.clone();
+            let runtime_handle = self.runtime_handle.clone();
             let connection = self.connection.clone();
             nats_connection
                 .subscribe(&topic)
                 .map_err(|e| Error::Nats(e))?
                 .with_handler(move |message| {
-                    Self::on_nats_message(message, &logger, &sender, &runtime, connection.clone())
+                    Self::on_nats_message(
+                        message,
+                        &logger,
+                        &sender,
+                        runtime_handle.clone(),
+                        connection.clone(),
+                    )
                 })
         };
 
@@ -114,18 +117,18 @@ impl NatsRpcServer {
             .lock()
             .unwrap()
             .replace((nats_connection, sub));
-        Ok(NatsServerConnection {
-            rpc_receiver: rpc_receiver,
-        })
+        Ok(NatsServerConnection { rpc_receiver })
     }
 
     fn on_nats_message(
         mut message: nats::Message,
         logger: &slog::Logger,
         sender: &mpsc::Sender<Rpc>,
-        runtime: &Arc<Mutex<tokio::runtime::Runtime>>,
+        runtime_handle: tokio::runtime::Handle,
         conn: Arc<Mutex<Option<(nats::Connection, nats::subscription::Handler)>>>,
     ) -> std::io::Result<()> {
+        debug!(logger, "received nats message"; "message" => %message);
+
         let mut sender = sender.clone();
         let req = Message::decode(message.data.as_ref())?;
         let (responder, response_receiver) = oneshot::channel();
@@ -142,15 +145,16 @@ impl NatsRpcServer {
 
         match sender.try_send(Rpc { req, responder }) {
             Ok(_) => {
-                let runtime = runtime.lock().unwrap();
+                // let runtime = runtime.lock().unwrap();
                 // For the moment we are ignoring the handle returned by the task.
                 // Worst case scenario we will have to kill the task in the middle of its processing
                 // at the end of the program.
-                debug!(logger, "received request from nats");
-
                 let _ = {
                     let logger = logger.clone();
-                    runtime.spawn(async move {
+                    // runtime.spawn(async move {
+                    trace!(logger, "spawning response receiver task");
+                    runtime_handle.spawn(async move {
+                        trace!(logger, "OLOLOLOL =========================");
                         match response_receiver.await {
                             Ok(response) => {
                                 if let Some((ref mut conn, _)) = conn.lock().unwrap().deref_mut() {
@@ -180,7 +184,6 @@ impl NatsRpcServer {
             }
         };
 
-        debug!(logger, "received msg"; "message" => %message);
         Ok(())
     }
 
@@ -221,8 +224,8 @@ mod test {
     use std::collections::HashMap;
     use std::error::Error as StdError;
 
-    #[test]
-    fn server_starts_and_stops() -> Result<(), Box<dyn StdError>> {
+    #[tokio::test]
+    async fn server_starts_and_stops() -> Result<(), Box<dyn StdError>> {
         let sv = Arc::new(Server {
             id: ServerId::from("my-id"),
             kind: ServerKind::from("room"),
@@ -231,17 +234,16 @@ mod test {
             hostname: "".to_owned(),
         });
 
-        let mut rt = tokio::runtime::Runtime::new()?;
-
         let mut rpc_server = NatsRpcServer::new(
             test_helpers::get_root_logger(),
             sv.clone(),
-            Config::default(),
+            Arc::new(Config::default()),
+            tokio::runtime::Handle::current(),
         );
         let mut rpc_server_conn = rpc_server.start()?;
 
         let handle = {
-            rt.spawn(async move {
+            tokio::spawn(async move {
                 loop {
                     if let Some(rpc) = rpc_server_conn.next_rpc().await {
                         let res = protos::Response {
@@ -261,25 +263,27 @@ mod test {
         {
             let mut client = rpc_client::NatsClient::new(
                 test_helpers::get_root_logger(),
-                rpc_client::Config::default(),
+                Arc::new(rpc_client::Config::default()),
             );
             client.connect()?;
 
-            let res = client.call(
-                sv.clone(),
-                protos::Request {
-                    r#type: protos::RpcType::User as i32,
-                    msg: Some(protos::Msg {
-                        r#type: protos::MsgType::MsgRequest as i32,
-                        data: "sending some data".as_bytes().to_owned(),
-                        route: "room.room.join".to_owned(),
-                        ..protos::Msg::default()
-                    }),
-                    frontend_id: "".to_owned(),
-                    metadata: "{}".as_bytes().to_owned(),
-                    ..protos::Request::default()
-                },
-            )?;
+            let res = client
+                .call(
+                    sv.clone(),
+                    protos::Request {
+                        r#type: protos::RpcType::User as i32,
+                        msg: Some(protos::Msg {
+                            r#type: protos::MsgType::MsgRequest as i32,
+                            data: "sending some data".as_bytes().to_owned(),
+                            route: "room.room.join".to_owned(),
+                            ..protos::Msg::default()
+                        }),
+                        frontend_id: "".to_owned(),
+                        metadata: "{}".as_bytes().to_owned(),
+                        ..protos::Request::default()
+                    },
+                )
+                .await?;
 
             assert_eq!(
                 String::from_utf8_lossy(&res.data),
@@ -289,7 +293,7 @@ mod test {
         }
 
         rpc_server.stop()?;
-        rt.block_on(handle)?;
+        handle.await?;
         Ok(())
     }
 }
