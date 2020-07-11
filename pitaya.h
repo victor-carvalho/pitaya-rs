@@ -102,14 +102,14 @@ void pitaya_send_rpc(Pitaya *p,
                      char *server_id,
                      char *route_str,
                      PitayaBuffer *request_buffer,
-                     void *user_data,
-                     void (*callback)(void*, PitayaError*, PitayaBuffer*));
+                     void (*callback)(void*, PitayaError*, PitayaBuffer*),
+                     void *user_data);
 
 void pitaya_server_by_id(Pitaya *p,
                          char *server_id,
                          char *server_kind,
-                         void *user_data,
-                         void (*callback)(void*, PitayaServer*));
+                         void (*callback)(void*, PitayaServer*),
+                         void *user_data);
 
 void pitaya_server_drop(PitayaServer *pitaya_server);
 

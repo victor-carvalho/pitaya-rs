@@ -16,8 +16,6 @@
 #include "request.pb.c"
 #include "response.pb.c"
 
-#include <unistd.h>
-
 static bool
 write_string(pb_ostream_t *stream, const pb_field_t *field, void * const *arg)
 {
@@ -100,6 +98,7 @@ server_by_id_callback(void *user_data, PitayaServer *server)
 {
     if (server) {
         printf("Server was found!: id=%s\n", pitaya_server_id(server));
+        pitaya_server_drop(server);
     } else {
         printf("Server was NOT found!\n");
     }
@@ -182,8 +181,6 @@ int main()
 
     printf("Getting server by id...\n");
     pitaya_server_by_id(pitaya, "server_id", "server_kind", server_by_id_callback, NULL);
-
-    sleep(5);
 
     pitaya_wait_shutdown_signal(pitaya);
 

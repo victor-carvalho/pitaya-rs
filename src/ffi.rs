@@ -280,7 +280,6 @@ pub extern "C" fn pitaya_server_by_id(
             Ok(Some(sv)) => {
                 let sv = Box::into_raw(Box::new(PitayaServer::new(sv)));
                 callback(user_data.0, sv);
-                let _ = unsafe { Box::from_raw(sv) };
             }
             Ok(None) => {
                 callback(user_data.0, null_mut());
