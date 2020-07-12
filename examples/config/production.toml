@@ -1,0 +1,3 @@
+debug = false
+shutdown_timeout = "12s"
+server_kind = "SuperKind"

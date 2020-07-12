@@ -23,13 +23,6 @@ namespace NPitaya
         ServerRemoved = 1,
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct CRpc
-    {
-        public IntPtr reqBufferPtr;
-        public IntPtr tag;
-    }
-
     public class Server
     {
         IntPtr serverHandle;
@@ -75,69 +68,6 @@ namespace NPitaya
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct SDConfig
-    {
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string endpoints;
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string etcdPrefix;
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string serverTypeFiltersStr;
-        public int heartbeatTTLSec;
-        public int logHeartbeat;
-        public int logServerSync;
-        public int logServerDetails;
-        public int syncServersIntervalSec;
-        public int maxNumberOfRetries;
-
-        public SDConfig(string endpoints, string etcdPrefix, List<string> serverTypeFilters, int heartbeatTTLSec, bool logHeartbeat,
-            bool logServerSync, bool logServerDetails, int syncServersIntervalSec, int maxNumberOfRetries)
-        {
-            this.endpoints = endpoints;
-            this.etcdPrefix = etcdPrefix;
-            this.heartbeatTTLSec = heartbeatTTLSec;
-            this.logHeartbeat = Convert.ToInt32(logHeartbeat);
-            this.logServerSync = Convert.ToInt32(logServerSync);
-            this.logServerDetails = Convert.ToInt32(logServerDetails);
-            this.syncServersIntervalSec = syncServersIntervalSec;
-            this.maxNumberOfRetries = maxNumberOfRetries;
-            try
-            {
-                serverTypeFiltersStr = SimpleJson.SerializeObject(serverTypeFilters);
-            }
-            catch (Exception e)
-            {
-                throw new Exception("Failed to serialize serverTypeFilters: " + e.Message);
-            }
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct GrpcConfig
-    {
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string host;
-        public int port;
-        public int serverShutdownDeadlineMs;
-        public int serverMaxNumberOfRpcs;
-        public int clientRpcTimeoutMs;
-
-        public GrpcConfig(
-            string host,
-            int port,
-            int serverShutdownDeadlineMs,
-            int serverMaxNumberOfRpcs,
-            int clientRpcTimeoutMs)
-        {
-            this.host = host;
-            this.port = port;
-            this.serverShutdownDeadlineMs = serverShutdownDeadlineMs;
-            this.serverMaxNumberOfRpcs = serverMaxNumberOfRpcs;
-            this.clientRpcTimeoutMs = clientRpcTimeoutMs;
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
     public struct Route
     {
         [MarshalAs(UnmanagedType.LPStr)]
@@ -180,50 +110,6 @@ namespace NPitaya
                 return $"{svType}.{service}.{method}";
             }
             return $"{service}.{method}";
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MemoryBuffer
-    {
-        public IntPtr data;
-        public int size;
-
-        public byte[] GetData()
-        {
-            byte[] data = new byte[this.size];
-            Marshal.Copy(this.data, data, 0, this.size);
-            return data;
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct NatsConfig
-    {
-        [MarshalAs(UnmanagedType.LPStr)]
-        public string endpoint;
-        public Int64 connectionTimeoutMs;
-        public int requestTimeoutMs;
-        public int serverShutdownDeadlineMs;
-        public int serverMaxNumberOfRpcs;
-        public int maxConnectionRetries;
-        public int maxPendingMessages;
-
-        public NatsConfig(string endpoint,
-                          int connectionTimeoutMs,
-                          int requestTimeoutMs,
-                          int serverShutdownDeadlineMs,
-                          int serverMaxNumberOfRpcs,
-                          int maxConnectionRetries,
-                          int maxPendingMessages)
-        {
-            this.endpoint = endpoint;
-            this.connectionTimeoutMs = connectionTimeoutMs;
-            this.requestTimeoutMs = requestTimeoutMs;
-            this.serverShutdownDeadlineMs = serverShutdownDeadlineMs;
-            this.serverMaxNumberOfRpcs = serverMaxNumberOfRpcs;
-            this.maxConnectionRetries = maxConnectionRetries;
-            this.maxPendingMessages = maxPendingMessages;
         }
     }
 }

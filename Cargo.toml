@@ -9,12 +9,6 @@ name = "pitaya"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "main"
-path = "src/main.rs"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 tonic = "0.2.1"
 prost = "0.6.1"
@@ -31,6 +25,8 @@ slog = { version = "2.5", features = ["max_level_trace"] }
 slog-json = "2.3"
 slog-term = "2.6.0"
 slog-async = "2.5.0"
+config = "0.10"
+humantime-serde = "1.0"
 
 [build-dependencies]
 prost-build = "0.6.1"

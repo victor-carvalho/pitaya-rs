@@ -3,6 +3,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#define DEFAULT_NATS_MAX_PENDING_MESSAGES 100
+
+#define DEFAULT_NATS_MAX_RECONN_ATTEMPTS 5
+
+#define DEFAULT_NATS_MAX_RPCS_QUEUED 100
+
 typedef enum {
     PitayaClusterNotification_ServerAdded = 0,
     PitayaClusterNotification_ServerRemoved = 1,
@@ -32,28 +38,6 @@ typedef struct PitayaRpc PitayaRpc;
 
 typedef struct PitayaServer PitayaServer;
 
-typedef struct {
-    char *addr;
-    int64_t connection_timeout_ms;
-    int32_t request_timeout_ms;
-    int32_t server_shutdown_deadline_ms;
-    int32_t server_max_number_of_rpcs;
-    int32_t max_reconnection_attempts;
-    int32_t max_pending_msgs;
-} PitayaNATSConfig;
-
-typedef struct {
-    char *endpoints;
-    char *etcd_prefix;
-    char *server_type_filters;
-    int32_t heartbeat_ttl_sec;
-    int32_t log_heartbeat;
-    int32_t log_server_sync;
-    int32_t log_server_details;
-    int32_t sync_servers_interval_sec;
-    int32_t max_number_of_retries;
-} PitayaSDConfig;
-
 typedef void (*PitayaHandleRpcCallback)(void*, PitayaRpc*);
 
 typedef void (*PitayaClusterNotificationCallback)(void*, PitayaClusterNotification, PitayaServer*);
@@ -70,9 +54,8 @@ void pitaya_error_drop(PitayaError *error);
 
 const char *pitaya_error_message(PitayaError *err);
 
-PitayaError *pitaya_initialize_with_nats(PitayaNATSConfig *nc,
-                                         PitayaSDConfig *sd_config,
-                                         PitayaServer *sv,
+PitayaError *pitaya_initialize_with_nats(char *env_prefix,
+                                         char *config_file,
                                          PitayaHandleRpcCallback handle_rpc_cb,
                                          void *handle_rpc_data,
                                          PitayaLogLevel log_level,

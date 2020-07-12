@@ -1,4 +1,4 @@
-use crate::{error::Error, protos, utils, Server};
+use crate::{error::Error, protos, settings, utils, Server};
 use async_trait::async_trait;
 use prost::Message;
 use slog::{debug, error, info, o, trace, warn};
@@ -35,25 +35,9 @@ pub struct NatsServerConnection {
     rpc_receiver: mpsc::Receiver<Rpc>,
 }
 
-pub struct Config {
-    pub address: String,
-    pub max_reconnects: usize,
-    pub max_rpcs_queued: usize,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            address: String::from("http://localhost:4222"),
-            max_reconnects: 5,
-            max_rpcs_queued: 100,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct NatsRpcServer {
-    config: Arc<Config>,
+    settings: Arc<settings::Nats>,
     connection: Arc<Mutex<Option<(nats::Connection, nats::subscription::Handler)>>>,
     this_server: Arc<Server>,
     runtime_handle: tokio::runtime::Handle,
@@ -64,11 +48,11 @@ impl NatsRpcServer {
     pub fn new(
         logger: slog::Logger,
         this_server: Arc<Server>,
-        config: Arc<Config>,
+        settings: Arc<settings::Nats>,
         runtime_handle: tokio::runtime::Handle,
     ) -> Self {
         Self {
-            config,
+            settings,
             this_server,
             logger,
             connection: Arc::new(Mutex::new(None)),
@@ -84,11 +68,11 @@ impl NatsRpcServer {
 
         // TODO(lhahn): add callbacks here for sending metrics.
         let nats_connection = nats::ConnectionOptions::new()
-            .max_reconnects(Some(self.config.max_reconnects))
-            .connect(&self.config.address)
+            .max_reconnects(Some(self.settings.max_reconnection_attempts as usize))
+            .connect(&self.settings.url)
             .map_err(|e| Error::Nats(e))?;
 
-        let (rpc_sender, rpc_receiver) = mpsc::channel(self.config.max_rpcs_queued);
+        let (rpc_sender, rpc_receiver) = mpsc::channel(self.settings.max_rpcs_queued as usize);
 
         let sub = {
             let topic = utils::topic_for_server(&self.this_server);
@@ -154,7 +138,6 @@ impl NatsRpcServer {
                     // runtime.spawn(async move {
                     trace!(logger, "spawning response receiver task");
                     runtime_handle.spawn(async move {
-                        trace!(logger, "OLOLOLOL =========================");
                         match response_receiver.await {
                             Ok(response) => {
                                 if let Some((ref mut conn, _)) = conn.lock().unwrap().deref_mut() {
@@ -237,7 +220,7 @@ mod test {
         let mut rpc_server = NatsRpcServer::new(
             test_helpers::get_root_logger(),
             sv.clone(),
-            Arc::new(Config::default()),
+            Arc::new(Default::default()),
             tokio::runtime::Handle::current(),
         );
         let mut rpc_server_conn = rpc_server.start()?;
@@ -263,7 +246,7 @@ mod test {
         {
             let mut client = rpc_client::NatsClient::new(
                 test_helpers::get_root_logger(),
-                Arc::new(rpc_client::Config::default()),
+                Arc::new(Default::default()),
             );
             client.connect()?;
 

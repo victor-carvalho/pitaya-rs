@@ -5,11 +5,11 @@ extern crate slog_term;
 extern crate tokio;
 
 use slog::{error, info, o, Drain};
-use std::time;
 
 fn init_logger() -> slog::Logger {
     let decorator = slog_term::TermDecorator::new().build();
-    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+    let drain = slog_term::CompactFormat::new(decorator).build();
+    let drain = slog::LevelFilter::new(drain, slog::Level::Trace).fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     slog::Logger::root(drain, o!())
 }
@@ -20,16 +20,9 @@ async fn main() {
     let logger = root_logger.clone();
 
     let (mut pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
-        .with_server_kind("random-kind")
+        .with_env_prefix("MY_ENV")
+        .with_config_file("examples/config/production.yaml")
         .with_logger(root_logger)
-        .with_rpc_client_config(pitaya::RpcClientConfig {
-            request_timeout: time::Duration::from_secs(4),
-            ..pitaya::RpcClientConfig::default()
-        })
-        .with_etcd_config(pitaya::EtcdConfig {
-            prefix: String::from("pitaya"),
-            ..pitaya::EtcdConfig::default()
-        })
         .with_rpc_handler({
             let logger = logger.clone();
             move |mut rpc| {
@@ -62,13 +55,13 @@ async fn main() {
 
     let res = pitaya_server
         .send_rpc(
-            "random-kind.room.join",
+            "SuperKind.room.join",
             pitaya::protos::Request {
                 r#type: pitaya::protos::RpcType::User as i32,
                 msg: Some(pitaya::protos::Msg {
                     r#type: pitaya::protos::MsgType::MsgRequest as i32,
                     data: "sending some data".as_bytes().to_owned(),
-                    route: "random-kind.room.join".to_owned(),
+                    route: "SuperKind.room.join".to_owned(),
                     ..pitaya::protos::Msg::default()
                 }),
                 frontend_id: "".to_owned(),

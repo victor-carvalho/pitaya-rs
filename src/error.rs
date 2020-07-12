@@ -18,6 +18,7 @@ pub enum Error {
     InvalidUserId,
     InvalidServerKind,
     InvalidProto(prost::DecodeError),
+    Config(config::ConfigError),
 }
 
 impl std::fmt::Display for Error {
@@ -38,6 +39,7 @@ impl std::fmt::Display for Error {
             Error::InvalidUserId => write!(f, "invalid user id"),
             Error::InvalidServerKind => write!(f, "invalid server kind"),
             Error::InvalidProto(ref e) => write!(f, "invalid proto: {}", e),
+            Error::Config(ref e) => write!(f, "invalid config: {}", e),
         }
     }
 }
@@ -53,6 +55,7 @@ impl std::error::Error for Error {
             Error::TaskJoin(ref e) => Some(e),
             Error::Tokio(ref e) => Some(e),
             Error::InvalidProto(ref e) => Some(e),
+            Error::Config(ref e) => Some(e),
             _ => None,
         }
     }
@@ -85,5 +88,11 @@ impl From<etcd_client::Error> for Error {
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
         Self::Json(e)
+    }
+}
+
+impl From<config::ConfigError> for Error {
+    fn from(e: config::ConfigError) -> Self {
+        Self::Config(e)
     }
 }

@@ -1,11 +1,10 @@
-use crate::{error::Error, Server, ServerId, ServerKind};
+use crate::{error::Error, settings, Server, ServerId, ServerKind};
 use async_trait::async_trait;
 use etcd_client::GetOptions;
 use slog::{debug, error, info, o, warn};
 use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 
 mod tasks;
@@ -44,7 +43,7 @@ impl ServersCache {
             servers_by_id: HashMap::new(),
             servers_by_kind: HashMap::new(),
             notification_chan: broadcast::channel(max_chan_size),
-            logger: logger,
+            logger,
         }
     }
 
@@ -99,26 +98,9 @@ impl ServersCache {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct EtcdConfig {
-    pub url: String,
-    pub prefix: String,
-    pub lease_ttl: Duration,
-}
-
-impl Default for EtcdConfig {
-    fn default() -> Self {
-        Self {
-            url: String::from("localhost:2379"),
-            prefix: String::from("pitaya"),
-            lease_ttl: Duration::from_secs(60),
-        }
-    }
-}
-
 // This service discovery is a lazy implementation.
 pub struct EtcdLazy {
-    config: EtcdConfig,
+    settings: Arc<settings::Etcd>,
     client: etcd_client::Client,
     this_server: Arc<Server>,
     lease_id: Option<i64>,
@@ -135,13 +117,13 @@ impl EtcdLazy {
     pub(crate) async fn new(
         logger: slog::Logger,
         server: Arc<Server>,
-        config: EtcdConfig,
+        settings: Arc<settings::Etcd>,
     ) -> Result<Self, etcd_client::Error> {
-        let client = etcd_client::Client::connect([&config.url], None).await?;
+        let client = etcd_client::Client::connect([&settings.url], None).await?;
         // TODO(lhahn): remove hardcoded max channel size.
         let max_chan_size = 80;
         Ok(Self {
-            config,
+            settings,
             client,
             this_server: server,
             servers_cache: Arc::new(RwLock::new(ServersCache::new(
@@ -181,7 +163,7 @@ impl EtcdLazy {
     }
 
     fn server_kind_prefix(&self, server_kind: &ServerKind) -> String {
-        format!("{}/servers/{}/", self.config.prefix, server_kind.0)
+        format!("{}/servers/{}/", self.settings.prefix, server_kind.0)
     }
 
     async fn revoke_lease(&mut self) -> Result<(), Error> {
@@ -217,7 +199,7 @@ impl EtcdLazy {
 
         let lease_response = self
             .client
-            .lease_grant(self.config.lease_ttl.as_secs() as i64, None)
+            .lease_grant(self.settings.lease_ttl.as_secs() as i64, None)
             .await?;
         self.lease_id = Some(lease_response.id());
 
@@ -227,7 +209,7 @@ impl EtcdLazy {
         self.keep_alive_task = Some((
             tokio::spawn(tasks::lease_keep_alive(
                 self.logger.new(o!("task" => "keep_alive")),
-                self.config.lease_ttl.clone(),
+                self.settings.lease_ttl.clone(),
                 keeper,
                 stream,
                 stop_receiver,
@@ -242,7 +224,7 @@ impl EtcdLazy {
     fn get_etcd_server_key(&self) -> String {
         format!(
             "{}/servers/{}/{}",
-            self.config.prefix, self.this_server.kind.0, self.this_server.id.0
+            self.settings.prefix, self.this_server.kind.0, self.this_server.id.0
         )
     }
 
@@ -261,7 +243,7 @@ impl EtcdLazy {
     }
 
     async fn start_watch(&mut self, app_die_sender: mpsc::Sender<()>) -> Result<(), Error> {
-        let watch_prefix = format!("{}/servers/", self.config.prefix);
+        let watch_prefix = format!("{}/servers/", self.settings.prefix);
         let options = etcd_client::WatchOptions::new().with_prefix();
         let (watcher, watch_stream) = self.client.watch(watch_prefix, Some(options)).await?;
 
@@ -269,7 +251,7 @@ impl EtcdLazy {
         let handle = tokio::spawn(tasks::watch_task(
             self.logger.new(o!("task" => "watch")),
             self.servers_cache.clone(),
-            self.config.prefix.clone(),
+            self.settings.prefix.clone(),
             watch_stream,
             app_die_sender,
         ));
@@ -339,10 +321,10 @@ impl ServiceDiscovery for EtcdLazy {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::test_helpers;
+    use crate::{constants, test_helpers};
     use std::error::Error as StdError;
+    use std::time::Duration;
 
-    const ETCD_URL: &str = "localhost:2379";
     const INVALID_ETCD_URL: &str = "localhost:1234";
 
     fn new_server() -> Arc<Server> {
@@ -361,11 +343,11 @@ mod test {
         let _sd = EtcdLazy::new(
             test_helpers::get_root_logger(),
             server,
-            EtcdConfig {
+            Arc::new(settings::Etcd {
                 prefix: "pitaya".to_owned(),
-                url: ETCD_URL.to_owned(),
+                url: constants::LOCAL_ETCD_URL.to_owned(),
                 lease_ttl: Duration::from_secs(60),
-            },
+            }),
         )
         .await?;
         Ok(())
@@ -378,11 +360,11 @@ mod test {
         let _sd = EtcdLazy::new(
             test_helpers::get_root_logger(),
             server,
-            EtcdConfig {
+            Arc::new(settings::Etcd {
                 prefix: "pitaya".to_owned(),
                 url: INVALID_ETCD_URL.to_owned(),
                 lease_ttl: Duration::from_secs(60),
-            },
+            }),
         )
         .await
         .unwrap();
@@ -394,11 +376,11 @@ mod test {
         let sd = EtcdLazy::new(
             test_helpers::get_root_logger(),
             server,
-            EtcdConfig {
+            Arc::new(settings::Etcd {
                 prefix: "pitaya".to_owned(),
-                url: ETCD_URL.to_owned(),
+                url: constants::LOCAL_ETCD_URL.to_owned(),
                 lease_ttl: Duration::from_secs(60),
-            },
+            }),
         )
         .await?;
         assert_eq!(sd.servers_cache.read().unwrap().servers_by_id.len(), 0);
@@ -411,11 +393,11 @@ mod test {
         let mut sd = EtcdLazy::new(
             test_helpers::get_root_logger(),
             new_server(),
-            EtcdConfig {
+            Arc::new(settings::Etcd {
                 prefix: "pitaya".to_owned(),
-                url: ETCD_URL.to_owned(),
+                url: constants::LOCAL_ETCD_URL.to_owned(),
                 lease_ttl: Duration::from_secs(60),
-            },
+            }),
         )
         .await?;
 
@@ -456,11 +438,11 @@ mod test {
         let mut sd = EtcdLazy::new(
             test_helpers::get_root_logger(),
             new_server(),
-            EtcdConfig {
+            Arc::new(settings::Etcd {
                 prefix: "pitaya".to_owned(),
-                url: ETCD_URL.to_owned(),
+                url: constants::LOCAL_ETCD_URL.to_owned(),
                 lease_ttl: Duration::from_secs(60),
-            },
+            }),
         )
         .await?;
 
@@ -481,11 +463,11 @@ mod test {
         let mut sd = EtcdLazy::new(
             test_helpers::get_root_logger(),
             server,
-            EtcdConfig {
+            Arc::new(settings::Etcd {
                 prefix: "pitaya".to_owned(),
-                url: ETCD_URL.to_owned(),
+                url: constants::LOCAL_ETCD_URL.to_owned(),
                 lease_ttl: Duration::from_secs(60),
-            },
+            }),
         )
         .await?;
 
@@ -502,11 +484,11 @@ mod test {
         let mut sd = EtcdLazy::new(
             test_helpers::get_root_logger(),
             server,
-            EtcdConfig {
+            Arc::new(settings::Etcd {
                 prefix: "pitaya".to_owned(),
-                url: ETCD_URL.to_owned(),
+                url: constants::LOCAL_ETCD_URL.to_owned(),
                 lease_ttl: Duration::from_secs(60),
-            },
+            }),
         )
         .await?;
 

@@ -148,24 +148,19 @@ namespace NPitaya
             }
         }
 
-        public static void Initialize(NatsConfig natsCfg,
-                                      SDConfig sdCfg,
-                                      Server server,
+        public static void Initialize(string envPrefix,
+                                      string configFile,
                                       NativeLogLevel logLevel,
                                       NativeLogKind logKind,
                                       ServiceDiscoveryListener serviceDiscoveryListener = null)
         {
-            IntPtr natsCfgPtr = new StructWrapper(natsCfg);
-            IntPtr sdCfgPtr = new StructWrapper(sdCfg);
-
             _serviceDiscoveryListener = serviceDiscoveryListener;
             handleRpcCallback = new HandleRpcCallbackFunc(HandleRpcCallback);
             clusterNotificationCallback = new ClusterNotificationCallbackFunc(ClusterNotificationCallback);
 
             IntPtr err = pitaya_initialize_with_nats(
-                natsCfgPtr,
-                sdCfgPtr,
-                server.Handle,
+                envPrefix,
+                configFile,
                 Marshal.GetFunctionPointerForDelegate(handleRpcCallback),
                 IntPtr.Zero,
                 logLevel,
@@ -252,6 +247,7 @@ namespace NPitaya
         public static void Terminate()
         {
             pitaya_shutdown(pitaya);
+            pitaya = IntPtr.Zero;
             MetricsReporters.Terminate();
         }
 

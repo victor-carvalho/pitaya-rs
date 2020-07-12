@@ -87,7 +87,8 @@ namespace NPitaya.Models
             Uid = uid;
             // TODO only if server type is backend
             // TODO bind callbacks
-            if (!string.IsNullOrEmpty(_frontendId)){
+            if (!string.IsNullOrEmpty(_frontendId))
+            {
                 return BindInFrontend();
             }
 

@@ -25,9 +25,8 @@ namespace NPitaya
         //
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern IntPtr pitaya_initialize_with_nats(
-            IntPtr natsCfg,
-            IntPtr sdCfg,
-            IntPtr server,
+            string envPrefix,
+            string configFile,
             IntPtr handleRpcCallback,
             IntPtr handleRpcData,
             NativeLogLevel logLevel,

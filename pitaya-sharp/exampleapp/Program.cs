@@ -18,35 +18,6 @@ namespace PitayaCSharpExample
 
       Console.WriteLine("c# prog running");
 
-      string serverId = System.Guid.NewGuid().ToString();
-
-      var sdConfig = new SDConfig(
-        endpoints: "http://127.0.0.1:2379",
-        etcdPrefix: "pitaya/",
-        serverTypeFilters: new List<string>(),
-        heartbeatTTLSec: 60,
-        logHeartbeat: true,
-        logServerSync: true,
-        logServerDetails: true,
-        syncServersIntervalSec: 30,
-        maxNumberOfRetries: 0);
-
-      var sv = new Server(
-          id: serverId,
-          kind: "csharp",
-          metadata: "",
-          hostname: "localhost",
-          frontend: false);
-
-      var natsConfig = new NatsConfig(
-          endpoint: "127.0.0.1:4222",
-          connectionTimeoutMs: 2000,
-          requestTimeoutMs: 1000,
-          serverShutdownDeadlineMs: 3,
-          serverMaxNumberOfRpcs: 100,
-          maxConnectionRetries: 3,
-          maxPendingMessages: 1000);
-
       var constantTags = new Dictionary<string, string>
       {
           {"game", "game"},
@@ -61,9 +32,8 @@ namespace PitayaCSharpExample
       try
       {
           PitayaCluster.Initialize(
-            natsConfig,
-            sdConfig,
-            sv,
+            "CSHARP",
+            "csharp.toml",
             NativeLogLevel.Trace,
             NativeLogKind.Console,
             new PitayaCluster.ServiceDiscoveryListener((action, server) =>
@@ -109,8 +79,6 @@ namespace PitayaCSharpExample
       PitayaCluster.RegisterHandler(th);
 
       TrySendRpc();
-      Console.ReadKey();
-      PitayaCluster.Terminate();
     }
 
     static async void TrySendRpc()

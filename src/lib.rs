@@ -1,6 +1,8 @@
 extern crate async_trait;
+extern crate config;
 extern crate etcd_client;
 extern crate futures;
+extern crate humantime_serde;
 extern crate nats;
 extern crate prost;
 extern crate serde;
@@ -13,24 +15,21 @@ extern crate tokio;
 extern crate uuid;
 
 pub mod cluster;
+mod constants;
 mod error;
 mod ffi;
 mod server;
+pub mod settings;
 #[cfg(test)]
 mod test_helpers;
 mod utils;
 
-pub use cluster::{
-    discovery::{EtcdConfig, ServiceDiscovery},
-    rpc_client::{Config as RpcClientConfig, RpcClient},
-    rpc_server::Config as RpcServerConfig,
-    Rpc,
-};
+pub use cluster::{discovery::ServiceDiscovery, rpc_client::RpcClient, Rpc};
 pub use error::Error;
 use server::{Server, ServerId, ServerKind};
 use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
-use std::{collections::HashMap, sync::Arc, time};
+use std::{collections::HashMap, sync::Arc};
 use tokio::{
     sync::{broadcast, mpsc, oneshot},
     task,
@@ -80,46 +79,52 @@ pub struct Pitaya {
     service_discovery: Arc<tokio::sync::Mutex<cluster::discovery::EtcdLazy>>,
     nats_rpc_client: cluster::rpc_client::NatsClient,
     nats_rpc_server: cluster::rpc_server::NatsRpcServer,
-    _shutdown_timeout: time::Duration,
     shared_state: Arc<SharedState>,
     logger: slog::Logger,
+    settings: Arc<settings::Settings>,
 }
 
 impl Pitaya {
-    async fn new(
+    async fn new<'a>(
         logger: slog::Logger,
         frontend: bool,
-        server_kind: ServerKind,
-        etcd_config: cluster::discovery::EtcdConfig,
-        rpc_client_config: Arc<cluster::rpc_client::Config>,
-        rpc_server_config: Arc<cluster::rpc_server::Config>,
-        shutdown_timeout: time::Duration,
+        env_prefix: Option<&'a str>,
+        config_file: Option<&'a str>,
+        base_settings: settings::Settings,
     ) -> Result<Self, Error> {
+        let settings = settings::Settings::new(base_settings, env_prefix, config_file)?;
+        let nats_settings = Arc::new(settings.nats.clone());
+        let etcd_settings = Arc::new(settings.etcd.clone());
+
+        if settings.server_kind.trim().is_empty() {
+            return Err(Error::InvalidServerKind);
+        }
+
         let server_id = uuid::Uuid::new_v4().to_string();
         let this_server = Arc::new(Server {
             id: ServerId(server_id),
-            kind: server_kind,
+            kind: ServerKind::from(&settings.server_kind),
             // TODO(lhahn): fill these options.
             metadata: HashMap::new(),
             hostname: "".to_owned(),
             frontend,
         });
 
-        debug!(logger, "this server: {:?}", this_server);
+        debug!(logger, "init"; "settings" => ?settings, "this_server" => ?this_server);
 
         let nats_rpc_client = cluster::rpc_client::NatsClient::new(
             logger.new(o!("module" => "rpc_client")),
-            rpc_client_config,
+            nats_settings.clone(),
         );
         let nats_rpc_server = cluster::rpc_server::NatsRpcServer::new(
             logger.new(o!("module" => "rpc_server")),
             this_server.clone(),
-            rpc_server_config,
+            nats_settings,
             tokio::runtime::Handle::current(),
         );
         let service_discovery = {
             let logger = logger.new(o!("module" => "service_discovery"));
-            cluster::discovery::EtcdLazy::new(logger, this_server.clone(), etcd_config).await
+            cluster::discovery::EtcdLazy::new(logger, this_server.clone(), etcd_settings).await
         }?;
 
         Ok(Self {
@@ -129,8 +134,8 @@ impl Pitaya {
             service_discovery: Arc::new(tokio::sync::Mutex::new(service_discovery)),
             nats_rpc_client,
             nats_rpc_server,
-            _shutdown_timeout: shutdown_timeout,
             logger,
+            settings: Arc::new(settings),
         })
     }
 
@@ -144,6 +149,7 @@ impl Pitaya {
     }
 
     pub async fn shutdown(mut self) -> Result<(), Error> {
+        println!("SHUTTING DOWN MAN");
         let tasks = self
             .shared_state
             .tasks
@@ -387,33 +393,29 @@ impl Pitaya {
     }
 }
 
-pub struct PitayaBuilder<RpcHandler> {
+pub struct PitayaBuilder<'a, RpcHandler> {
     frontend: bool,
-    server_kind: Option<ServerKind>,
-    etcd_config: cluster::discovery::EtcdConfig,
-    rpc_client_config: cluster::rpc_client::Config,
-    rpc_server_config: cluster::rpc_server::Config,
-    shutdown_timeout: time::Duration,
     rpc_handler: Option<RpcHandler>,
     logger: Option<slog::Logger>,
     cluster_subscriber: Option<Box<dyn FnMut(cluster::Notification) + Send + 'static>>,
+    env_prefix: Option<&'a str>,
+    config_file: Option<&'a str>,
+    base_settings: settings::Settings,
 }
 
-impl<RpcHandler> PitayaBuilder<RpcHandler>
+impl<'a, RpcHandler> PitayaBuilder<'a, RpcHandler>
 where
     RpcHandler: FnMut(cluster::Rpc) + Send + 'static,
 {
     pub fn new() -> Self {
         Self {
             frontend: false,
-            server_kind: None,
-            etcd_config: cluster::discovery::EtcdConfig::default(),
-            rpc_client_config: cluster::rpc_client::Config::default(),
-            rpc_server_config: cluster::rpc_server::Config::default(),
-            shutdown_timeout: time::Duration::from_secs(10),
             rpc_handler: None,
             logger: None,
             cluster_subscriber: None,
+            env_prefix: None,
+            config_file: None,
+            base_settings: Default::default(),
         }
     }
 
@@ -424,31 +426,6 @@ where
 
     pub fn with_frontend(mut self, frontend: bool) -> Self {
         self.frontend = frontend;
-        self
-    }
-
-    pub fn with_server_kind(mut self, server_kind: &str) -> Self {
-        self.server_kind = Some(ServerKind::from(server_kind));
-        self
-    }
-
-    pub fn with_etcd_config(mut self, c: cluster::discovery::EtcdConfig) -> Self {
-        self.etcd_config = c;
-        self
-    }
-
-    pub fn with_rpc_client_config(mut self, c: cluster::rpc_client::Config) -> Self {
-        self.rpc_client_config = c;
-        self
-    }
-
-    pub fn with_rpc_server_config(mut self, c: cluster::rpc_server::Config) -> Self {
-        self.rpc_server_config = c;
-        self
-    }
-
-    pub fn with_shutdown_timeout(mut self, t: time::Duration) -> Self {
-        self.shutdown_timeout = t;
         self
     }
 
@@ -465,17 +442,29 @@ where
         self
     }
 
+    pub fn with_env_prefix(mut self, prefix: &'a str) -> Self {
+        self.env_prefix.replace(prefix);
+        self
+    }
+
+    pub fn with_config_file(mut self, config_file: &'a str) -> Self {
+        self.config_file.replace(config_file);
+        self
+    }
+
+    pub fn with_base_settings(mut self, base_settings: settings::Settings) -> Self {
+        self.base_settings = base_settings;
+        self
+    }
+
     pub async fn build(self) -> Result<(Pitaya, oneshot::Receiver<()>), Error> {
         let mut p = Pitaya::new(
             self.logger
                 .expect("a logger should be passed to PitayaBuilder"),
             self.frontend,
-            self.server_kind
-                .expect("server kind should be provided to PitayaBuilder"),
-            self.etcd_config,
-            Arc::new(self.rpc_client_config),
-            Arc::new(self.rpc_server_config),
-            self.shutdown_timeout,
+            self.env_prefix,
+            self.config_file,
+            self.base_settings,
         )
         .await?;
 

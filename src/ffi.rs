@@ -1,7 +1,4 @@
-use crate::{
-    cluster, protos, utils, EtcdConfig, PitayaBuilder, RpcClientConfig, RpcServerConfig, ServerId,
-    ServerKind,
-};
+use crate::{cluster, protos, utils, PitayaBuilder, ServerId, ServerKind};
 use prost::Message;
 use slog::{error, info, o, Drain};
 use std::{
@@ -13,13 +10,21 @@ use std::{
     ptr::null_mut,
     slice,
     sync::{Arc, Mutex},
-    time,
 };
 use tokio::sync::oneshot;
 
 pub struct PitayaError {
-    code: String,
-    message: String,
+    code: CString,
+    message: CString,
+}
+
+impl PitayaError {
+    pub fn new(code: &str, message: &str) -> Self {
+        Self {
+            code: CString::new(code).unwrap(),
+            message: CString::new(message).unwrap(),
+        }
+    }
 }
 
 #[no_mangle]
@@ -161,30 +166,6 @@ impl std::convert::Into<slog::Level> for PitayaLogLevel {
     }
 }
 
-#[repr(C)]
-pub struct PitayaSDConfig {
-    endpoints: *mut c_char,
-    etcd_prefix: *mut c_char,
-    server_type_filters: *mut c_char,
-    heartbeat_ttl_sec: i32,
-    log_heartbeat: i32,
-    log_server_sync: i32,
-    log_server_details: i32,
-    sync_servers_interval_sec: i32,
-    max_number_of_retries: i32,
-}
-
-#[repr(C)]
-pub struct PitayaNATSConfig {
-    addr: *mut c_char,
-    connection_timeout_ms: i64,
-    request_timeout_ms: i32,
-    server_shutdown_deadline_ms: i32,
-    server_max_number_of_rpcs: i32,
-    max_reconnection_attempts: i32,
-    max_pending_msgs: i32,
-}
-
 //
 // PitayaBuffer struct
 //
@@ -318,10 +299,10 @@ pub extern "C" fn pitaya_rpc_respond(
     let response = match Message::decode(response_slice) {
         Ok(r) => r,
         Err(e) => {
-            return Box::into_raw(Box::new(PitayaError {
-                code: "PIT-400".to_owned(),
-                message: format!("invalid response bytes: {}", e),
-            }));
+            return Box::into_raw(Box::new(PitayaError::new(
+                "PIT-400",
+                &format!("invalid response bytes: {}", e),
+            )));
         }
     };
 
@@ -330,10 +311,10 @@ pub extern "C" fn pitaya_rpc_respond(
     if sent {
         null_mut()
     } else {
-        Box::into_raw(Box::new(PitayaError {
-            code: "PIT-500".to_owned(),
-            message: "could not answer rpc".to_owned(),
-        }))
+        Box::into_raw(Box::new(PitayaError::new(
+            "PIT-500",
+            "could not answer rpc",
+        )))
     }
 }
 
@@ -351,9 +332,8 @@ unsafe impl Sync for PitayaUserData {}
 
 #[no_mangle]
 pub extern "C" fn pitaya_initialize_with_nats(
-    nc: *mut PitayaNATSConfig,
-    sd_config: *mut PitayaSDConfig,
-    sv: *mut PitayaServer,
+    env_prefix: *mut c_char,
+    config_file: *mut c_char,
     handle_rpc_cb: PitayaHandleRpcCallback,
     handle_rpc_data: *mut c_void,
     log_level: PitayaLogLevel,
@@ -362,17 +342,17 @@ pub extern "C" fn pitaya_initialize_with_nats(
     cluster_notification_data: *mut c_void,
     pitaya: *mut *mut Pitaya,
 ) -> *mut PitayaError {
+    assert!(!env_prefix.is_null());
+    assert!(!config_file.is_null());
     assert!(!pitaya.is_null());
-    assert!(!sv.is_null());
-    assert!(!nc.is_null());
-    assert!(!sd_config.is_null());
+
+    let env_prefix = unsafe { CStr::from_ptr(env_prefix) };
+    let config_file = unsafe { CStr::from_ptr(config_file) };
 
     // This wrapper type is necessary in order to send it to
     // another thread.
     let handle_rpc_data = PitayaUserData(handle_rpc_data);
     let cluster_notification_data = PitayaUserData(cluster_notification_data);
-
-    let server = unsafe { mem::ManuallyDrop::new(Box::from_raw(sv)) };
 
     let root_logger = match log_kind {
         PitayaLogKind::Console => {
@@ -397,19 +377,9 @@ pub extern "C" fn pitaya_initialize_with_nats(
 
     let res = runtime.block_on(async move {
         PitayaBuilder::new()
-            .with_server_kind(&server.kind.to_string_lossy())
+            .with_env_prefix(&env_prefix.to_string_lossy())
+            .with_config_file(&config_file.to_string_lossy())
             .with_logger(root_logger)
-            .with_rpc_client_config(RpcClientConfig {
-                request_timeout: time::Duration::from_secs(4),
-                ..Default::default()
-            })
-            .with_rpc_server_config(RpcServerConfig {
-                ..Default::default()
-            })
-            .with_etcd_config(EtcdConfig {
-                prefix: String::from("pitaya"),
-                ..EtcdConfig::default()
-            })
             .with_rpc_handler(move |mut rpc| {
                 info!(
                     rpc_handler_logger,
@@ -458,10 +428,10 @@ pub extern "C" fn pitaya_initialize_with_nats(
         },
         Err(e) => {
             error!(logger, "failed to create pitaya server"; "error" => %e);
-            Box::into_raw(Box::new(PitayaError {
-                code: "PIT-500".to_owned(),
-                message: format!("failed to create pitaya server: {}", e),
-            }))
+            Box::into_raw(Box::new(PitayaError::new(
+                "PIT-500",
+                &format!("failed to create pitaya server: {}", e),
+            )))
         }
     }
 }
@@ -541,10 +511,7 @@ pub extern "C" fn pitaya_send_rpc(
             Ok(r) => r,
             Err(e) => {
                 error!(logger, "failed to convert route"; "error" => %e);
-                let mut err = Box::new(PitayaError {
-                    code: "PIT-500".to_owned(),
-                    message: format!("rpc error: {}", e),
-                });
+                let mut err = Box::new(PitayaError::new("PIT-500", &format!("rpc error: {}", e)));
                 callback(user_data.0, &mut *err as *mut PitayaError, null_mut());
                 return;
             }
@@ -566,10 +533,7 @@ pub extern "C" fn pitaya_send_rpc(
             Ok(r) => r,
             Err(e) => {
                 error!(logger, "RPC failed");
-                let mut err = Box::new(PitayaError {
-                    code: "PIT-500".to_owned(),
-                    message: format!("rpc error: {}", e),
-                });
+                let mut err = Box::new(PitayaError::new("PIT-500", &format!("rpc error: {}", e)));
                 callback(user_data.0, &mut *err as *mut PitayaError, null_mut());
                 return;
             }
@@ -610,10 +574,10 @@ pub extern "C" fn pitaya_send_kick(
         let kick_msg: protos::KickMsg = match Message::decode(kick_buffer.data.as_ref()) {
             Ok(m) => m,
             Err(e) => {
-                let mut err = Box::new(PitayaError {
-                    code: "PIT-400".to_owned(),
-                    message: format!("invalid kick buffer: {}", e),
-                });
+                let mut err = Box::new(PitayaError::new(
+                    "PIT-400",
+                    &format!("invalid kick buffer: {}", e),
+                ));
                 callback(user_data.0, &mut *err as *mut PitayaError, null_mut());
                 return;
             }
@@ -633,10 +597,10 @@ pub extern "C" fn pitaya_send_kick(
                 );
             }
             Err(e) => {
-                let mut err = Box::new(PitayaError {
-                    code: "PIT-500".to_owned(),
-                    message: format!("failed to send kick: {}", e),
-                });
+                let mut err = Box::new(PitayaError::new(
+                    "PIT-500",
+                    &format!("failed to send kick: {}", e),
+                ));
                 callback(user_data.0, &mut *err as *mut PitayaError, null_mut());
             }
         }
@@ -668,10 +632,10 @@ pub extern "C" fn pitaya_send_push_to_user(
         let push_msg: protos::Push = match Message::decode(push_buffer.data.as_ref()) {
             Ok(m) => m,
             Err(e) => {
-                let mut err = Box::new(PitayaError {
-                    code: "PIT-400".to_owned(),
-                    message: format!("invalid push buffer: {}", e),
-                });
+                let mut err = Box::new(PitayaError::new(
+                    "PIT-400",
+                    &format!("invalid push buffer: {}", e),
+                ));
                 callback(user_data.0, &mut *err as *mut PitayaError);
                 return;
             }
@@ -685,10 +649,10 @@ pub extern "C" fn pitaya_send_push_to_user(
                 callback(user_data.0, null_mut());
             }
             Err(e) => {
-                let mut err = Box::new(PitayaError {
-                    code: "PIT-500".to_owned(),
-                    message: format!("failed to send push: {}", e),
-                });
+                let mut err = Box::new(PitayaError::new(
+                    "PIT-500",
+                    &format!("failed to send push: {}", e),
+                ));
                 callback(user_data.0, &mut *err as *mut PitayaError);
             }
         }
