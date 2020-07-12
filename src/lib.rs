@@ -149,7 +149,6 @@ impl Pitaya {
     }
 
     pub async fn shutdown(mut self) -> Result<(), Error> {
-        println!("SHUTTING DOWN MAN");
         let tasks = self
             .shared_state
             .tasks

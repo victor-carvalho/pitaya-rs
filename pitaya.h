@@ -3,8 +3,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define DEFAULT_NATS_MAX_PENDING_MESSAGES 100
-
 #define DEFAULT_NATS_MAX_RECONN_ATTEMPTS 5
 
 #define DEFAULT_NATS_MAX_RPCS_QUEUED 100

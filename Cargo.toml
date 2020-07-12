@@ -27,6 +27,7 @@ slog-term = "2.6.0"
 slog-async = "2.5.0"
 config = "0.10"
 humantime-serde = "1.0"
+prometheus = "0.9"
 
 [build-dependencies]
 prost-build = "0.6.1"

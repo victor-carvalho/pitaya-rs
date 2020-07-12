@@ -47,7 +47,7 @@ namespace NPitaya
                 if (!HandlersDict.ContainsKey(handlerName))
                 {
                     response = GetErrorResponse("PIT-404",
-                        $"remote/handler not found! remote/handler name: {handlerName}");
+                        $"handler not found! handler name: {handlerName}");
                     return response;
                 }
 
@@ -58,7 +58,7 @@ namespace NPitaya
                 if (!RemotesDict.ContainsKey(handlerName))
                 {
                     response = GetErrorResponse("PIT-404",
-                        $"remote/handler not found! remote/handler name: {handlerName}");
+                        $"remote not found! remote name: {handlerName}");
                     return response;
                 }
 
