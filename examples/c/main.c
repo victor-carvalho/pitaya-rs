@@ -106,19 +106,6 @@ server_by_id_callback(void *user_data, PitayaServer *server)
 
 int main()
 {
-    PitayaNATSConfig nats_config = {0};
-    nats_config.addr = "http://localhost:4222";
-    nats_config.connection_timeout_ms = 5000;
-    nats_config.request_timeout_ms = 5000;
-    nats_config.server_shutdown_deadline_ms = 5000;
-    nats_config.server_max_number_of_rpcs = 100;
-    nats_config.max_reconnection_attempts = 20;
-    nats_config.max_pending_msgs = 50;
-
-    PitayaSDConfig sd_config = {0};
-    sd_config.endpoints = "localhost:2379";
-    sd_config.etcd_prefix = "pitaya";
-
     PitayaServer *server = pitaya_server_new(
         "my-server-id-from-c",
         "my-server-kind-from-c",
@@ -131,9 +118,8 @@ int main()
     Pitaya *pitaya = NULL;
 
     err = pitaya_initialize_with_nats(
-        &nats_config,
-        &sd_config,
-        server,
+        "MY_ENV",
+        "default.toml",
         handle_rpc,
         NULL,
         PitayaLogLevel_Trace,

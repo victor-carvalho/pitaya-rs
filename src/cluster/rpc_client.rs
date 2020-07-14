@@ -178,7 +178,7 @@ mod tests {
     use super::*;
     use crate::{
         cluster::discovery::{EtcdLazy, ServiceDiscovery},
-        test_helpers, ServerId, ServerKind,
+        constants, test_helpers, ServerId, ServerKind,
     };
     use std::collections::HashMap;
     use std::error::Error as StdError;
@@ -275,7 +275,7 @@ mod tests {
                 sv,
                 Arc::new(settings::Etcd {
                     prefix: "pitaya".to_owned(),
-                    url: test_helpers::ETCD_URL.to_owned(),
+                    url: constants::LOCAL_ETCD_URL.to_owned(),
                     lease_ttl: Duration::from_secs(50),
                 }),
             )

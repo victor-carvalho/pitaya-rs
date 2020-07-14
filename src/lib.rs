@@ -4,6 +4,7 @@ extern crate etcd_client;
 extern crate futures;
 extern crate humantime_serde;
 extern crate nats;
+extern crate prometheus;
 extern crate prost;
 extern crate serde;
 extern crate serde_json;
@@ -18,6 +19,7 @@ pub mod cluster;
 mod constants;
 mod error;
 mod ffi;
+mod metrics;
 mod server;
 pub mod settings;
 #[cfg(test)]
