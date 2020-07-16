@@ -35,7 +35,7 @@ namespace PitayaCSharpExample
             "CSHARP",
             "csharp.toml",
             NativeLogLevel.Trace,
-            NativeLogKind.Console,
+            NativeLogKind.Function,
             new PitayaCluster.ServiceDiscoveryListener((action, server) =>
             {
                 switch (action)

@@ -140,6 +140,7 @@ pub extern "C" fn pitaya_server_drop(pitaya_server: *mut PitayaServer) {
 pub enum PitayaLogKind {
     Console = 0,
     Json = 1,
+    Function = 2,
 }
 
 #[repr(C)]
@@ -330,16 +331,45 @@ pub extern "C" fn pitaya_rpc_drop(rpc: *mut PitayaRpc) {
 unsafe impl Send for PitayaUserData {}
 unsafe impl Sync for PitayaUserData {}
 
+struct FunctionWriter {
+    buf: Vec<u8>,
+    log_function: extern "C" fn(*mut c_char),
+}
+
+impl FunctionWriter {
+    fn new(log_function: extern "C" fn(*mut c_char)) -> Self {
+        Self {
+            buf: Vec::new(),
+            log_function,
+        }
+    }
+}
+
+impl std::io::Write for FunctionWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.buf.extend(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let c_string = CString::new(&self.buf[..]).unwrap();
+        self.buf.clear();
+        (self.log_function)(c_string.as_ptr() as *mut c_char);
+        Ok(())
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn pitaya_initialize_with_nats(
     env_prefix: *mut c_char,
     config_file: *mut c_char,
     handle_rpc_cb: PitayaHandleRpcCallback,
     handle_rpc_data: *mut c_void,
-    log_level: PitayaLogLevel,
-    log_kind: PitayaLogKind,
     cluster_notification_callback: PitayaClusterNotificationCallback,
     cluster_notification_data: *mut c_void,
+    log_level: PitayaLogLevel,
+    log_kind: PitayaLogKind,
+    log_function: extern "C" fn(*mut c_char),
     pitaya: *mut *mut Pitaya,
 ) -> *mut PitayaError {
     assert!(!env_prefix.is_null());
@@ -357,7 +387,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
     let root_logger = match log_kind {
         PitayaLogKind::Console => {
             let decorator = slog_term::TermDecorator::new().build();
-            let drain = slog_term::CompactFormat::new(decorator).build();
+            let drain = slog_term::FullFormat::new(decorator).build();
             let drain = slog::LevelFilter::new(drain, log_level.into()).fuse();
             let drain = slog_async::Async::new(drain).build().fuse();
             slog::Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")))
@@ -366,6 +396,12 @@ pub extern "C" fn pitaya_initialize_with_nats(
             Mutex::new(slog_json::Json::default(std::io::stderr())).map(slog::Fuse),
             o!("version" => env!("CARGO_PKG_VERSION")),
         ),
+        PitayaLogKind::Function => {
+            let decorator = slog_term::PlainSyncDecorator::new(FunctionWriter::new(log_function));
+            let drain = slog_term::FullFormat::new(decorator).build();
+            let drain = slog::LevelFilter::new(drain, log_level.into()).fuse();
+            slog::Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")))
+        }
     };
 
     let logger = root_logger.clone();

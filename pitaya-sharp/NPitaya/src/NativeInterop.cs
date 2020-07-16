@@ -65,6 +65,7 @@ namespace NPitaya
     {
         Console = 0,
         Json = 1,
+        Function = 2,
     }
 
     [StructLayout(LayoutKind.Sequential)]

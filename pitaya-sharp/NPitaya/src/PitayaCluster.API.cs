@@ -27,6 +27,7 @@ namespace NPitaya
         private static IntPtr pitaya;
         private static HandleRpcCallbackFunc handleRpcCallback;
         private static ClusterNotificationCallbackFunc clusterNotificationCallback;
+        private static LogFunction logFunctionCallback;
 
         private static Action _onSignalEvent;
 
@@ -157,16 +158,18 @@ namespace NPitaya
             _serviceDiscoveryListener = serviceDiscoveryListener;
             handleRpcCallback = new HandleRpcCallbackFunc(HandleRpcCallback);
             clusterNotificationCallback = new ClusterNotificationCallbackFunc(ClusterNotificationCallback);
+            logFunctionCallback = new LogFunction(LogFunctionCallback);
 
             IntPtr err = pitaya_initialize_with_nats(
                 envPrefix,
                 configFile,
                 Marshal.GetFunctionPointerForDelegate(handleRpcCallback),
                 IntPtr.Zero,
-                logLevel,
-                logKind,
                 Marshal.GetFunctionPointerForDelegate(clusterNotificationCallback),
                 IntPtr.Zero,
+                logLevel,
+                logKind,
+                logKind == NativeLogKind.Function ? Marshal.GetFunctionPointerForDelegate(logFunctionCallback) : IntPtr.Zero,
                 out pitaya
             );
 
@@ -176,6 +179,13 @@ namespace NPitaya
                 pitaya_error_drop(err);
                 throw new PitayaException($"Initialization failed: code={pitayaError.Code} msg={pitayaError.Message}");
             }
+        }
+
+        static void LogFunctionCallback(IntPtr msg)
+        {
+            string stringMsg = Marshal.PtrToStringAnsi(msg);
+            stringMsg = stringMsg.Substring(0, column.Length - 1);
+            Console.WriteLine("C#: " + stringMsg);
         }
 
         public static void RegisterRemote(BaseRemote remote)

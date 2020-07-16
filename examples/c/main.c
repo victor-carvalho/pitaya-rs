@@ -104,6 +104,12 @@ server_by_id_callback(void *user_data, PitayaServer *server)
     }
 }
 
+static void
+log_function(char *msg)
+{
+    printf("LOG FROM C: %s", msg);
+}
+
 int main()
 {
     PitayaServer *server = pitaya_server_new(
@@ -122,10 +128,11 @@ int main()
         "default.toml",
         handle_rpc,
         NULL,
-        PitayaLogLevel_Trace,
-        PitayaLogKind_Console,
         on_cluster_notification,
         NULL,
+        PitayaLogLevel_Trace,
+        PitayaLogKind_Function,
+        log_function,
         &pitaya
     );
 

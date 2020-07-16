@@ -15,6 +15,7 @@ typedef enum {
 typedef enum {
     PitayaLogKind_Console = 0,
     PitayaLogKind_Json = 1,
+    PitayaLogKind_Function = 2,
 } PitayaLogKind;
 
 typedef enum {
@@ -56,10 +57,11 @@ PitayaError *pitaya_initialize_with_nats(char *env_prefix,
                                          char *config_file,
                                          PitayaHandleRpcCallback handle_rpc_cb,
                                          void *handle_rpc_data,
-                                         PitayaLogLevel log_level,
-                                         PitayaLogKind log_kind,
                                          PitayaClusterNotificationCallback cluster_notification_callback,
                                          void *cluster_notification_data,
+                                         PitayaLogLevel log_level,
+                                         PitayaLogKind log_kind,
+                                         void (*log_function)(char*),
                                          Pitaya **pitaya);
 
 void pitaya_rpc_drop(PitayaRpc *rpc);

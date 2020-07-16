@@ -5,18 +5,29 @@ namespace NPitaya
 {
     public partial class PitayaCluster
     {
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void ServerAddedOrRemoved(int serverAdded, IntPtr server, IntPtr user);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void SendRpcCallback(IntPtr userData, IntPtr err, IntPtr response);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void ServerByIdCallback(IntPtr userData, IntPtr server);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void SendKickCallback(IntPtr userData, IntPtr err, IntPtr kickAnswerBuffer);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void SendPushCallback(IntPtr userData, IntPtr err);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void LogFunction(IntPtr msg);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void HandleRpcCallbackFunc(IntPtr userData, IntPtr rpc);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void ClusterNotificationCallbackFunc(IntPtr userData, NotificationType notificationType, IntPtr data);
-
 
         private const string LibName = "libpitaya";
 
@@ -29,10 +40,11 @@ namespace NPitaya
             string configFile,
             IntPtr handleRpcCallback,
             IntPtr handleRpcData,
-            NativeLogLevel logLevel,
-            NativeLogKind logKind,
             IntPtr clusterNotificationCallback,
             IntPtr clusterNotificationData,
+            NativeLogLevel logLevel,
+            NativeLogKind logKind,
+            IntPtr logFunction,
             out IntPtr pitaya);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern void pitaya_shutdown(IntPtr pitaya);

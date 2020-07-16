@@ -5,3 +5,4 @@ main
 *.log
 .ccls-cache
 .vscode
+.DS_Store
