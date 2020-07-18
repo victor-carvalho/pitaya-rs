@@ -36,6 +36,10 @@ namespace PitayaCSharpExample
             "csharp.toml",
             NativeLogLevel.Trace,
             NativeLogKind.Function,
+            (msg) =>
+            {
+                Console.Write($"C# Log: {msg}");
+            },
             new PitayaCluster.ServiceDiscoveryListener((action, server) =>
             {
                 switch (action)

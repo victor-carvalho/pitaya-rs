@@ -153,23 +153,25 @@ namespace NPitaya
                                       string configFile,
                                       NativeLogLevel logLevel,
                                       NativeLogKind logKind,
+                                      Action<string> logFunction,
                                       ServiceDiscoveryListener serviceDiscoveryListener = null)
         {
             _serviceDiscoveryListener = serviceDiscoveryListener;
             handleRpcCallback = new HandleRpcCallbackFunc(HandleRpcCallback);
             clusterNotificationCallback = new ClusterNotificationCallbackFunc(ClusterNotificationCallback);
             logFunctionCallback = new LogFunction(LogFunctionCallback);
+            var logCtx = GCHandle.Alloc(logFunction, GCHandleType.Normal);
 
             IntPtr err = pitaya_initialize_with_nats(
+                IntPtr.Zero,
                 envPrefix,
                 configFile,
                 Marshal.GetFunctionPointerForDelegate(handleRpcCallback),
-                IntPtr.Zero,
                 Marshal.GetFunctionPointerForDelegate(clusterNotificationCallback),
-                IntPtr.Zero,
                 logLevel,
                 logKind,
-                logKind == NativeLogKind.Function ? Marshal.GetFunctionPointerForDelegate(logFunctionCallback) : IntPtr.Zero,
+                Marshal.GetFunctionPointerForDelegate(logFunctionCallback),
+                GCHandle.ToIntPtr(logCtx),
                 out pitaya
             );
 
@@ -181,11 +183,16 @@ namespace NPitaya
             }
         }
 
-        static void LogFunctionCallback(IntPtr msg)
+        static void LogFunctionCallback(IntPtr ctx, IntPtr msg)
         {
-            string stringMsg = Marshal.PtrToStringAnsi(msg);
-            stringMsg = stringMsg.Substring(0, column.Length - 1);
-            Console.WriteLine("C#: " + stringMsg);
+            if (ctx == IntPtr.Zero)
+            {
+                return;
+            }
+            var handle = GCHandle.FromIntPtr(ctx);
+            var logFn = (Action<string>)handle.Target;
+            var msgStr = Marshal.PtrToStringAnsi(msg);
+            logFn(msgStr);
         }
 
         public static void RegisterRemote(BaseRemote remote)

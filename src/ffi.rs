@@ -218,6 +218,7 @@ pub type PitayaClusterNotificationCallback =
 
 pub type PitayaHandleRpcCallback = extern "C" fn(*mut c_void, *mut PitayaRpc);
 
+#[derive(Debug, Clone, Copy)]
 struct PitayaUserData(*mut c_void);
 
 pub struct Pitaya {
@@ -331,16 +332,20 @@ pub extern "C" fn pitaya_rpc_drop(rpc: *mut PitayaRpc) {
 unsafe impl Send for PitayaUserData {}
 unsafe impl Sync for PitayaUserData {}
 
+pub type PitayaLogFunction = extern "C" fn(*mut c_void, *mut c_char);
+// FunctionWriter allows the usage of a function from C as a logging function.
 struct FunctionWriter {
     buf: Vec<u8>,
-    log_function: extern "C" fn(*mut c_char),
+    log_function: PitayaLogFunction,
+    context: PitayaUserData,
 }
 
 impl FunctionWriter {
-    fn new(log_function: extern "C" fn(*mut c_char)) -> Self {
+    fn new(log_function: PitayaLogFunction, context: PitayaUserData) -> Self {
         Self {
             buf: Vec::new(),
             log_function,
+            context,
         }
     }
 }
@@ -354,22 +359,22 @@ impl std::io::Write for FunctionWriter {
     fn flush(&mut self) -> std::io::Result<()> {
         let c_string = CString::new(&self.buf[..]).unwrap();
         self.buf.clear();
-        (self.log_function)(c_string.as_ptr() as *mut c_char);
+        (self.log_function)(self.context.0, c_string.as_ptr() as *mut c_char);
         Ok(())
     }
 }
 
 #[no_mangle]
 pub extern "C" fn pitaya_initialize_with_nats(
+    ctx: *mut c_void,
     env_prefix: *mut c_char,
     config_file: *mut c_char,
     handle_rpc_cb: PitayaHandleRpcCallback,
-    handle_rpc_data: *mut c_void,
     cluster_notification_callback: PitayaClusterNotificationCallback,
-    cluster_notification_data: *mut c_void,
     log_level: PitayaLogLevel,
     log_kind: PitayaLogKind,
-    log_function: extern "C" fn(*mut c_char),
+    log_function: extern "C" fn(*mut c_void, *mut c_char),
+    log_ctx: *mut c_void,
     pitaya: *mut *mut Pitaya,
 ) -> *mut PitayaError {
     assert!(!env_prefix.is_null());
@@ -381,8 +386,8 @@ pub extern "C" fn pitaya_initialize_with_nats(
 
     // This wrapper type is necessary in order to send it to
     // another thread.
-    let handle_rpc_data = PitayaUserData(handle_rpc_data);
-    let cluster_notification_data = PitayaUserData(cluster_notification_data);
+    let ctx = PitayaUserData(ctx);
+    let log_ctx = PitayaUserData(log_ctx);
 
     let root_logger = match log_kind {
         PitayaLogKind::Console => {
@@ -397,7 +402,8 @@ pub extern "C" fn pitaya_initialize_with_nats(
             o!("version" => env!("CARGO_PKG_VERSION")),
         ),
         PitayaLogKind::Function => {
-            let decorator = slog_term::PlainSyncDecorator::new(FunctionWriter::new(log_function));
+            let decorator =
+                slog_term::PlainSyncDecorator::new(FunctionWriter::new(log_function, log_ctx));
             let drain = slog_term::FullFormat::new(decorator).build();
             let drain = slog::LevelFilter::new(drain, log_level.into()).fuse();
             slog::Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")))
@@ -427,14 +433,14 @@ pub extern "C" fn pitaya_initialize_with_nats(
                     request: request_buffer,
                     responder: rpc.responder(),
                 }));
-                handle_rpc_cb(handle_rpc_data.0, rpc);
+                handle_rpc_cb(ctx.0, rpc);
             })
             .with_cluster_subscriber({
                 move |notification| match notification {
                     cluster::Notification::ServerAdded(server) => {
                         let raw_server = Box::into_raw(Box::new(PitayaServer::new(server)));
                         cluster_notification_callback(
-                            cluster_notification_data.0,
+                            ctx.0,
                             PitayaClusterNotification::ServerAdded,
                             raw_server,
                         );
@@ -442,7 +448,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
                     cluster::Notification::ServerRemoved(server) => {
                         let raw_server = Box::into_raw(Box::new(PitayaServer::new(server)));
                         cluster_notification_callback(
-                            cluster_notification_data.0,
+                            ctx.0,
                             PitayaClusterNotification::ServerRemoved,
                             raw_server,
                         );

@@ -21,7 +21,7 @@ namespace NPitaya
         private delegate void SendPushCallback(IntPtr userData, IntPtr err);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void LogFunction(IntPtr msg);
+        private delegate void LogFunction(IntPtr context, IntPtr msg);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void HandleRpcCallbackFunc(IntPtr userData, IntPtr rpc);
@@ -36,15 +36,15 @@ namespace NPitaya
         //
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern IntPtr pitaya_initialize_with_nats(
+            IntPtr context,
             string envPrefix,
             string configFile,
             IntPtr handleRpcCallback,
-            IntPtr handleRpcData,
             IntPtr clusterNotificationCallback,
-            IntPtr clusterNotificationData,
             NativeLogLevel logLevel,
             NativeLogKind logKind,
             IntPtr logFunction,
+            IntPtr logCtx,
             out IntPtr pitaya);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern void pitaya_shutdown(IntPtr pitaya);

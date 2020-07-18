@@ -105,7 +105,7 @@ server_by_id_callback(void *user_data, PitayaServer *server)
 }
 
 static void
-log_function(char *msg)
+log_function(void *ctx, char *msg)
 {
     printf("LOG FROM C: %s", msg);
 }
@@ -124,15 +124,15 @@ int main()
     Pitaya *pitaya = NULL;
 
     err = pitaya_initialize_with_nats(
+        NULL,
         "MY_ENV",
         "default.toml",
         handle_rpc,
-        NULL,
         on_cluster_notification,
-        NULL,
         PitayaLogLevel_Trace,
         PitayaLogKind_Function,
         log_function,
+        NULL /* log context */,
         &pitaya
     );
 

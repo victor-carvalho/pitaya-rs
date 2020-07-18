@@ -53,15 +53,15 @@ void pitaya_error_drop(PitayaError *error);
 
 const char *pitaya_error_message(PitayaError *err);
 
-PitayaError *pitaya_initialize_with_nats(char *env_prefix,
+PitayaError *pitaya_initialize_with_nats(void *ctx,
+                                         char *env_prefix,
                                          char *config_file,
                                          PitayaHandleRpcCallback handle_rpc_cb,
-                                         void *handle_rpc_data,
                                          PitayaClusterNotificationCallback cluster_notification_callback,
-                                         void *cluster_notification_data,
                                          PitayaLogLevel log_level,
                                          PitayaLogKind log_kind,
-                                         void (*log_function)(char*),
+                                         void (*log_function)(void*, char*),
+                                         void *log_ctx,
                                          Pitaya **pitaya);
 
 void pitaya_rpc_drop(PitayaRpc *rpc);
