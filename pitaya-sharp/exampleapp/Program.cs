@@ -1,11 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Tasks;
 using exampleapp.Handlers;
 using exampleapp.remotes;
 using NPitaya;
-using NPitaya.Metrics;
 using NPitaya.Models;
 
 namespace PitayaCSharpExample
@@ -29,13 +27,19 @@ namespace PitayaCSharpExample
     //   var prometheusMR = new PrometheusMetricsReporter("default", "game", 9090);
     //   MetricsReporters.AddMetricReporter(prometheusMR);
 
+      AppDomain.CurrentDomain.ProcessExit += (object sender, EventArgs args) =>
+      {
+          Console.WriteLine("shutting down pitaya cluster");
+          PitayaCluster.Terminate();
+      };
+
       try
       {
           PitayaCluster.Initialize(
             "CSHARP",
             "csharp.toml",
             NativeLogLevel.Trace,
-            NativeLogKind.Function,
+            NativeLogKind.Console,
             (msg) =>
             {
                 Console.Write($"C# Log: {msg}");
@@ -58,22 +62,12 @@ namespace PitayaCSharpExample
                         throw new ArgumentOutOfRangeException(nameof(action), action, null);
                 }
             }));
-        //PitayaCluster.Initialize(natsConfig, sdConfig, sv, NativeLogLevel.Debug, "");
       }
       catch (PitayaException exc)
       {
         Logger.Error("Failed to create cluster: {0}", exc.Message);
         Environment.Exit(1);
       }
-
-      new Thread(() => {
-        Console.WriteLine("Waiting shutdown signal...");
-        PitayaCluster.WaitShutdownSignal();
-        Console.WriteLine("Done waiting...");
-        PitayaCluster.Terminate();
-        Environment.Exit(1);
-        // Environment.FailFast("oops");
-      }).Start();
 
       Logger.Info("pitaya lib initialized successfully :)");
 
@@ -83,6 +77,8 @@ namespace PitayaCSharpExample
       PitayaCluster.RegisterHandler(th);
 
       TrySendRpc();
+
+      PitayaCluster.WaitShutdownSignal();
     }
 
     static async void TrySendRpc()

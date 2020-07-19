@@ -117,4 +117,4 @@ PitayaServer *pitaya_server_new(char *id,
 
 void pitaya_shutdown(Pitaya *p);
 
-void pitaya_wait_shutdown_signal(Pitaya *pitaya_server);
+void pitaya_wait_shutdown_signal(Pitaya *p);

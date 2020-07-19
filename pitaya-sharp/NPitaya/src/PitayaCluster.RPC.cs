@@ -13,24 +13,7 @@ namespace NPitaya
 {
     public partial class PitayaCluster
     {
-        private static async Task<Response> RPCCbFuncImpl(Request req, Stopwatch sw)
-        {
-            Response response;
-            switch (req.Type)
-            {
-                case RPCType.User:
-                    response = await HandleRpc(req, RPCType.User);
-                    break;
-                case RPCType.Sys:
-                    response = await HandleRpc(req, RPCType.Sys);
-                    break;
-                default:
-                    throw new Exception($"invalid rpc type, argument:{req.Type}");
-            }
-            return response;
-        }
-
-        internal static async Task<Response> HandleRpc(Protos.Request req, RPCType type)
+        static async Task<Response> HandleRpc(Protos.Request req, RPCType type)
         {
             byte[] data = req.Msg.Data.ToByteArray();
             Route route = Route.FromString(req.Msg.Route);
@@ -98,5 +81,58 @@ namespace NPitaya
             response.Data = ByteString.CopyFrom(ansBytes);
             return response;
         }
+
+        static void DispatchRpc(IntPtr rpc, Protos.Request req)
+        {
+            Task.Run(async () => {
+                var res = new Protos.Response();
+                try
+                {
+                    switch (req.Type)
+                    {
+                        case RPCType.User:
+                            res = await HandleRpc(req, RPCType.User);
+                            break;
+                        case RPCType.Sys:
+                            res = await HandleRpc(req, RPCType.Sys);
+                            break;
+                        default:
+                            throw new Exception($"invalid rpc type, argument:{req.Type}");
+                    }
+                }
+                catch (Exception e)
+                {
+                    res = GetErrorResponse("PIT-500", e.Message);
+
+                    var innerMostException = e;
+                    while (innerMostException.InnerException != null)
+                        innerMostException = innerMostException.InnerException;
+
+                    Logger.Error("Exception thrown in handler: {0}", innerMostException.Message);
+#if NPITAYA_DEBUG
+                    Logger.Error("StackTrace: {0}", e.StackTrace);
+#endif
+                }
+                finally
+                {
+                    unsafe
+                    {
+                        byte[] responseData = res.ToByteArray();
+                        Int32 responseLen = responseData.Length;
+
+                        fixed (byte* p = responseData)
+                        {
+                            IntPtr err = pitaya_rpc_respond(rpc, (IntPtr)p, responseLen);
+                            if (err != IntPtr.Zero)
+                            {
+                                pitaya_error_drop(err);
+                                Logger.Error("Failed to respond to rpc");
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
     }
 }

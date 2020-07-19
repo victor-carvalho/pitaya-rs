@@ -147,18 +147,26 @@ impl EtcdLazy {
     pub(crate) async fn stop(&mut self) -> Result<(), Error> {
         info!(self.logger, "stopping etcd service discovery");
         if let Some((handle, sender)) = self.keep_alive_task.take() {
-            let _ = sender.send(()).map_err(|_| {
+            info!(self.logger, "cancelling keep alive task");
+            if let Err(_) = sender.send(()) {
                 error!(self.logger, "failed to send stop message");
-            });
-            handle.await?;
+            }
+            if let Err(e) = handle.await {
+                error!(self.logger, "failed to wait for keep alive task"; "error" => %e);
+            }
         }
         if let Some((handle, mut watcher)) = self.watch_task.take() {
             info!(self.logger, "cancelling watcher");
-            watcher.cancel().await?;
-            handle.await?;
+            if let Err(e) = watcher.cancel().await {
+                error!(self.logger, "failed to cancel watcher"; "error" => %e);
+            }
+            if let Err(e) = handle.await {
+                error!(self.logger, "failed to wait for watcher"; "error" => %e);
+            }
         }
-        debug!(self.logger, "revoking lease");
-        self.revoke_lease().await?;
+        if let Err(e) = self.revoke_lease().await {
+            error!(self.logger, "failed to revoke lease"; "error" => %e);
+        }
         Ok(())
     }
 
@@ -169,6 +177,9 @@ impl EtcdLazy {
     async fn revoke_lease(&mut self) -> Result<(), Error> {
         if let Some(lease_id) = self.lease_id {
             self.client.lease_revoke(lease_id).await?;
+            info!(self.logger, "lease revoked"; "lease_id" => lease_id);
+        } else {
+            warn!(self.logger, "lease not found, not revoking");
         }
         Ok(())
     }

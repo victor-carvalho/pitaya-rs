@@ -8,7 +8,7 @@ use slog::{error, info, o, Drain};
 
 fn init_logger() -> slog::Logger {
     let decorator = slog_term::TermDecorator::new().build();
-    let drain = slog_term::CompactFormat::new(decorator).build();
+    let drain = slog_term::FullFormat::new(decorator).build();
     let drain = slog::LevelFilter::new(drain, slog::Level::Trace).fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     slog::Logger::root(drain, o!())
@@ -55,13 +55,13 @@ async fn main() {
 
     let res = pitaya_server
         .send_rpc(
-            "SuperKind.room.join",
+            "room.room.join",
             pitaya::protos::Request {
                 r#type: pitaya::protos::RpcType::User as i32,
                 msg: Some(pitaya::protos::Msg {
                     r#type: pitaya::protos::MsgType::MsgRequest as i32,
                     data: "sending some data".as_bytes().to_owned(),
-                    route: "SuperKind.room.join".to_owned(),
+                    route: "csharp.room.join".to_owned(),
                     ..pitaya::protos::Msg::default()
                 }),
                 frontend_id: "".to_owned(),

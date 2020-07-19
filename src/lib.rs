@@ -160,10 +160,21 @@ impl Pitaya {
             .expect("tasks should've been created");
 
         info!(self.logger, "shutting down pitaya server");
-        self.nats_rpc_client.close();
-        self.nats_rpc_server.stop()?;
-        tasks.listen_for_rpc.await?;
+
+        info!(self.logger, "stopping service discovery");
         self.service_discovery.lock().await.stop().await?;
+        info!(self.logger, "stopped");
+
+        info!(self.logger, "stopping rpc client");
+        self.nats_rpc_client.close();
+
+        info!(self.logger, "stopping rpc server");
+        self.nats_rpc_server.stop()?;
+
+        info!(self.logger, "waiting listen for rpc task");
+        tasks.listen_for_rpc.await?;
+
+        info!(self.logger, "waiting graceful shutdown task");
         tasks.graceful_shutdown.await?;
         Ok(())
     }
@@ -271,12 +282,6 @@ impl Pitaya {
             app_die_receiver,
         ));
 
-        self.service_discovery
-            .lock()
-            .await
-            .start(app_die_sender)
-            .await?;
-
         self.nats_rpc_client.connect()?;
 
         let nats_rpc_server_connection = self.nats_rpc_server.start()?;
@@ -290,6 +295,14 @@ impl Pitaya {
             listen_for_rpc,
             graceful_shutdown,
         });
+
+        // Always start the service discovery last, since before getting RPCs we need to make
+        // sure that the server is set up.
+        self.service_discovery
+            .lock()
+            .await
+            .start(app_die_sender)
+            .await?;
 
         info!(self.logger, "finshed starting pitaya server");
         Ok(graceful_shutdown_receiver)

@@ -479,19 +479,25 @@ pub extern "C" fn pitaya_initialize_with_nats(
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_wait_shutdown_signal(pitaya_server: *mut Pitaya) {
-    assert!(!pitaya_server.is_null());
-    let mut pitaya_server = unsafe { mem::ManuallyDrop::new(Box::from_raw(pitaya_server)) };
-    let logger = pitaya_server.pitaya_server.logger.clone();
+pub extern "C" fn pitaya_wait_shutdown_signal(p: *mut Pitaya) {
+    assert!(!p.is_null());
+    let mut p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
+    let logger = p.pitaya_server.logger.clone();
 
     let mut rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-    if let Some(shutdown_receiver) = pitaya_server.shutdown_receiver.take() {
-        rt.block_on(async move {
-            let _ = shutdown_receiver.await.map_err(|e| {
-                error!(logger, "failed to wait for shutdown signal: {}", e);
-            });
+
+    assert!(
+        p.shutdown_receiver.is_some(),
+        "shutdown receiver should exist"
+    );
+
+    let shutdown_receiver = p.shutdown_receiver.take().unwrap();
+
+    rt.block_on(async move {
+        let _ = shutdown_receiver.await.map_err(|e| {
+            error!(logger, "failed to wait for shutdown signal: {}", e);
         });
-    }
+    });
 }
 
 #[no_mangle]
@@ -499,8 +505,8 @@ pub extern "C" fn pitaya_shutdown(p: *mut Pitaya) {
     assert!(!p.is_null());
     let mut p = unsafe { Box::from_raw(p) };
     let logger = p.pitaya_server.logger.clone();
-
     let pitaya_server = p.pitaya_server.clone();
+
     p.runtime.block_on(async move {
         if let Err(e) = pitaya_server.shutdown().await {
             error!(logger, "failed to shutdown pitaya server: {}", e);

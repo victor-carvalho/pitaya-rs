@@ -4,6 +4,13 @@ dependencies = [
     "docker-compose-up",
     "run-example-server",
 ]
+[tasks.build-linux]
+script_runner = "@shell"
+script = [
+'''
+docker run --rm -v $PWD:/usr/src/pitaya -w /usr/src/pitaya rust:1.45.0 cargo build --release
+'''
+]
 
 [tasks.undeps]
 dependencies = [
