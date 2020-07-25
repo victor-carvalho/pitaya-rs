@@ -3,6 +3,8 @@ extern crate config;
 extern crate etcd_client;
 extern crate futures;
 extern crate humantime_serde;
+extern crate hyper;
+extern crate lazy_static;
 extern crate nats;
 extern crate prometheus;
 extern crate prost;
@@ -24,7 +26,7 @@ mod server;
 pub mod settings;
 #[cfg(test)]
 mod test_helpers;
-mod utils;
+pub mod utils;
 
 pub use cluster::{discovery::ServiceDiscovery, rpc_client::RpcClient, Rpc};
 pub use error::Error;
@@ -33,7 +35,7 @@ use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
-    sync::{broadcast, mpsc, oneshot},
+    sync::{broadcast, mpsc, oneshot, Mutex},
     task,
 };
 
@@ -78,12 +80,13 @@ struct SharedState {
 // Currently, it only implements cluster mode.
 #[derive(Clone)]
 pub struct Pitaya {
-    service_discovery: Arc<tokio::sync::Mutex<cluster::discovery::EtcdLazy>>,
+    service_discovery: Arc<Mutex<cluster::discovery::EtcdLazy>>,
     nats_rpc_client: cluster::rpc_client::NatsClient,
     nats_rpc_server: cluster::rpc_server::NatsRpcServer,
     shared_state: Arc<SharedState>,
     logger: slog::Logger,
     settings: Arc<settings::Settings>,
+    metrics_server: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl Pitaya {
@@ -138,6 +141,7 @@ impl Pitaya {
             nats_rpc_server,
             logger,
             settings: Arc::new(settings),
+            metrics_server: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -273,13 +277,27 @@ impl Pitaya {
         info!(self.logger, "starting pitaya server");
 
         let (graceful_shutdown_sender, graceful_shutdown_receiver) = oneshot::channel();
+
         // NOTE(lhahn): I don't expect that we'll attemp to send more than 20 die messages.
-        let (app_die_sender, app_die_receiver) = mpsc::channel(20);
+        let (app_die_sender, app_die_receiver) = broadcast::channel(20);
+
+        // Start the metrics server first if it is enabled.
+        if self.settings.metrics.enabled {
+            let addr = self
+                .settings
+                .metrics
+                .url
+                .parse()
+                .map_err(|e| Error::InvalidAddress(self.settings.metrics.url.to_string()))?;
+
+            let ms = metrics::start_server(self.logger.clone(), addr, app_die_receiver);
+            self.metrics_server.lock().await.replace(tokio::spawn(ms));
+        }
 
         let graceful_shutdown = tokio::spawn(Self::graceful_shutdown_task(
             self.logger.new(o!("task" => "graceful_shutdown")),
             graceful_shutdown_sender,
-            app_die_receiver,
+            app_die_sender.subscribe(),
         ));
 
         self.nats_rpc_client.connect()?;
@@ -311,7 +329,7 @@ impl Pitaya {
     async fn graceful_shutdown_task(
         logger: slog::Logger,
         graceful_shutdown_sender: oneshot::Sender<()>,
-        mut app_die_receiver: mpsc::Receiver<()>,
+        mut app_die_receiver: broadcast::Receiver<()>,
     ) {
         use tokio::signal::unix::{signal, SignalKind};
         let mut signal_hangup =

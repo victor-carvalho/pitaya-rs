@@ -1,3 +1,10 @@
 debug = false
 shutdown_timeout = "12s"
 server_kind = "SuperKind"
+
+[nats]
+request_timeout = "3s"
+
+[metrics]
+enabled = true
+url = "127.0.0.1:8000"

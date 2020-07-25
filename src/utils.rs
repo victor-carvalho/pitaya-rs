@@ -28,7 +28,7 @@ pub(crate) fn random_server(servers: &[Arc<Server>]) -> Option<Arc<Server>> {
     }
 }
 
-pub(crate) fn encode_proto<P>(msg: &P) -> Vec<u8>
+pub fn encode_proto<P>(msg: &P) -> Vec<u8>
 where
     P: prost::Message,
 {

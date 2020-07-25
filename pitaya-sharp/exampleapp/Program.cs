@@ -38,7 +38,7 @@ namespace PitayaCSharpExample
           PitayaCluster.Initialize(
             "CSHARP",
             "csharp.toml",
-            NativeLogLevel.Trace,
+            NativeLogLevel.Info,
             NativeLogKind.Console,
             (msg) =>
             {

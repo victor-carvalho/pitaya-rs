@@ -5,7 +5,7 @@ use slog::{debug, error, info, o, warn};
 use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::sync::{Arc, RwLock};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 
 mod tasks;
 
@@ -119,6 +119,7 @@ impl EtcdLazy {
         server: Arc<Server>,
         settings: Arc<settings::Etcd>,
     ) -> Result<Self, etcd_client::Error> {
+        info!(logger, "connecting to etcd"; "url" => &settings.url);
         let client = etcd_client::Client::connect([&settings.url], None).await?;
         // TODO(lhahn): remove hardcoded max channel size.
         let max_chan_size = 80;
@@ -137,7 +138,10 @@ impl EtcdLazy {
         })
     }
 
-    pub(crate) async fn start(&mut self, app_die_sender: mpsc::Sender<()>) -> Result<(), Error> {
+    pub(crate) async fn start(
+        &mut self,
+        app_die_sender: broadcast::Sender<()>,
+    ) -> Result<(), Error> {
         self.grant_lease(app_die_sender.clone()).await?;
         self.add_server_to_etcd().await?;
         self.start_watch(app_die_sender).await?;
@@ -204,7 +208,7 @@ impl EtcdLazy {
         Ok(())
     }
 
-    async fn grant_lease(&mut self, app_die_sender: mpsc::Sender<()>) -> Result<(), Error> {
+    async fn grant_lease(&mut self, app_die_sender: broadcast::Sender<()>) -> Result<(), Error> {
         assert!(self.lease_id.is_none());
         assert!(self.keep_alive_task.is_none());
 
@@ -253,7 +257,7 @@ impl EtcdLazy {
         Ok(())
     }
 
-    async fn start_watch(&mut self, app_die_sender: mpsc::Sender<()>) -> Result<(), Error> {
+    async fn start_watch(&mut self, app_die_sender: broadcast::Sender<()>) -> Result<(), Error> {
         let watch_prefix = format!("{}/servers/", self.settings.prefix);
         let options = etcd_client::WatchOptions::new().with_prefix();
         let (watcher, watch_stream) = self.client.watch(watch_prefix, Some(options)).await?;
@@ -469,7 +473,7 @@ mod test {
     #[tokio::test]
     async fn server_lease_works() -> Result<(), Box<dyn StdError>> {
         let server = new_server();
-        let (app_die_sender, _app_die_recv) = mpsc::channel(10);
+        let (app_die_sender, _app_die_recv) = broadcast::channel(10);
 
         let mut sd = EtcdLazy::new(
             test_helpers::get_root_logger(),
@@ -505,7 +509,7 @@ mod test {
 
         let mut subscribe_chan = sd.subscribe();
 
-        let (app_die_sender, _app_die_recv) = mpsc::channel(10);
+        let (app_die_sender, _app_die_recv) = broadcast::channel(10);
         sd.start(app_die_sender).await?;
 
         let servers_added = Arc::new(RwLock::new(Vec::new()));

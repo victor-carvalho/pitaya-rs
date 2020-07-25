@@ -16,3 +16,6 @@ pub const DEFAULT_NATS_MAX_RPCS_QUEUED: u32 = 100;
 pub const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const DEFAULT_SERVER_KIND: &str = "pitaya";
+
+pub const DEFAULT_METRICS_URL: &str = "localhost:8000";
+pub const DEFAULT_METRICS_PATH: &str = "/metrics";

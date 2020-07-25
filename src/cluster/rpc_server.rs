@@ -1,9 +1,10 @@
-use crate::{error::Error, protos, settings, utils, Server};
+use crate::{error::Error, metrics, protos, settings, utils, Server};
 use async_trait::async_trait;
 use prost::Message;
 use slog::{debug, error, info, o, trace, warn};
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
@@ -67,6 +68,7 @@ impl NatsRpcServer {
         }
 
         // TODO(lhahn): add callbacks here for sending metrics.
+        info!(self.logger, "server connecting to nats"; "url" => &self.settings.url);
         let nats_connection = nats::ConnectionOptions::new()
             .max_reconnects(Some(self.settings.max_reconnection_attempts as usize))
             .connect(&self.settings.url)
@@ -113,9 +115,16 @@ impl NatsRpcServer {
     ) -> std::io::Result<()> {
         debug!(logger, "received nats message"; "message" => %message);
 
+        let rpc_start = Instant::now();
         let mut sender = sender.clone();
-        let req = Message::decode(message.data.as_ref())?;
+        let req: protos::Request = Message::decode(message.data.as_ref())?;
         let (responder, response_receiver) = oneshot::channel();
+
+        let route = if let Some(msg) = req.msg.as_ref() {
+            msg.route.to_string()
+        } else {
+            String::new()
+        };
 
         assert!(conn.lock().unwrap().is_some());
 
@@ -129,7 +138,6 @@ impl NatsRpcServer {
 
         match sender.try_send(Rpc { req, responder }) {
             Ok(_) => {
-                // let runtime = runtime.lock().unwrap();
                 // For the moment we are ignoring the handle returned by the task.
                 // Worst case scenario we will have to kill the task in the middle of its processing
                 // at the end of the program.
@@ -145,9 +153,12 @@ impl NatsRpcServer {
                                     if let Err(err) = Self::respond(conn, &response_topic, response)
                                     {
                                         error!(logger, "failed to respond rpc"; "error" => %err);
+                                        metrics::record_rpc_duration(rpc_start, &route, "failed");
+                                    } else {
+                                        metrics::record_rpc_duration(rpc_start, &route, "ok");
                                     }
                                 } else {
-                                    error!(logger, "CONNECTION NOT OPEN, CANNOT ANSWER");
+                                    error!(logger, "connection not open, cannot answer");
                                 }
                             }
                             Err(e) => {
@@ -161,6 +172,22 @@ impl NatsRpcServer {
             Err(mpsc::error::TrySendError::Full(_)) => {
                 // TODO(lhahn): respond 502 here, and add metric.
                 warn!(logger, "channel is full, dropping request");
+                if let Some((ref mut conn, _)) = conn.lock().unwrap().deref_mut() {
+                    let response = protos::Response {
+                        error: Some(protos::Error {
+                            code: "PIT-502".to_string(),
+                            msg: "server is overwhelmed".to_string(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    };
+                    if let Err(err) = Self::respond(conn, &response_topic, response) {
+                        error!(logger, "failed to respond rpc"; "error" => %err);
+                    }
+                    metrics::record_rpc_duration(rpc_start, &route, "failed");
+                } else {
+                    error!(logger, "connection not open, cannot answer");
+                }
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 warn!(logger, "rpc channel stoped being listened");

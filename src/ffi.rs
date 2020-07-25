@@ -392,9 +392,12 @@ pub extern "C" fn pitaya_initialize_with_nats(
     let root_logger = match log_kind {
         PitayaLogKind::Console => {
             let decorator = slog_term::TermDecorator::new().build();
-            let drain = slog_term::FullFormat::new(decorator).build();
-            let drain = slog::LevelFilter::new(drain, log_level.into()).fuse();
-            let drain = slog_async::Async::new(drain).build().fuse();
+            let drain = slog_term::FullFormat::new(decorator).build().fuse();
+            let drain = slog_async::Async::new(drain)
+                .chan_size(500)
+                .build()
+                .filter_level(log_level.into())
+                .fuse();
             slog::Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")))
         }
         PitayaLogKind::Json => slog::Logger::root(
@@ -502,7 +505,10 @@ pub extern "C" fn pitaya_wait_shutdown_signal(p: *mut Pitaya) {
 
 #[no_mangle]
 pub extern "C" fn pitaya_shutdown(p: *mut Pitaya) {
-    assert!(!p.is_null());
+    if p.is_null() {
+        return;
+    }
+
     let mut p = unsafe { Box::from_raw(p) };
     let logger = p.pitaya_server.logger.clone();
     let pitaya_server = p.pitaya_server.clone();

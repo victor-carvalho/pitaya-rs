@@ -1,7 +1,7 @@
 use crate::{error::Error, protos, settings, utils, Server, ServerId, ServerKind};
 use async_trait::async_trait;
 use prost::Message;
-use slog::trace;
+use slog::{info, trace};
 use std::sync::Arc;
 
 #[async_trait]
@@ -43,6 +43,7 @@ impl NatsClient {
 
     pub fn connect(&mut self) -> Result<(), Error> {
         assert!(self.connection.is_none());
+        info!(self.logger, "client connecting to nats"; "url" => &self.settings.url);
         let nc = nats::ConnectionOptions::new()
             .max_reconnects(Some(self.settings.max_reconnection_attempts as usize))
             .connect(&self.settings.url)

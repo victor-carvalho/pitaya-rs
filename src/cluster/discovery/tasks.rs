@@ -3,15 +3,15 @@ use crate::{Server, ServerId, ServerKind};
 use slog::{debug, error, info, warn};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, oneshot};
 
 pub(super) async fn lease_keep_alive(
     logger: slog::Logger,
     mut lease_ttl: Duration,
     mut keeper: etcd_client::LeaseKeeper,
     mut stream: etcd_client::LeaseKeepAliveStream,
-    mut stop_chan: tokio::sync::oneshot::Receiver<()>,
-    mut app_die_chan: mpsc::Sender<()>,
+    mut stop_chan: oneshot::Receiver<()>,
+    app_die_chan: broadcast::Sender<()>,
 ) {
     use tokio::time::timeout;
 
@@ -28,7 +28,7 @@ pub(super) async fn lease_keep_alive(
                 // Figure out if a more robust retrying scheme is necessary here.
                 if let Err(e) = keeper.keep_alive().await {
                     error!(logger, "failed keep alive request: {}", e);
-                    if let Err(_) = app_die_chan.try_send(()) {
+                    if let Err(_) = app_die_chan.send(()) {
                         error!(logger, "failed to send die message");
                     }
                     return;
@@ -69,7 +69,7 @@ pub(super) async fn watch_task(
     servers_cache: Arc<RwLock<ServersCache>>,
     prefix: String,
     mut stream: etcd_client::WatchStream,
-    mut app_die_sender: mpsc::Sender<()>,
+    app_die_sender: broadcast::Sender<()>,
 ) {
     loop {
         debug!(logger, "watching for etcd changes...");
@@ -146,7 +146,7 @@ pub(super) async fn watch_task(
                 // FIXME, TODO(lhahn): should we send an event to kill the pod here?
                 // panic!("failed to get watch message: {}", e);
                 error!(logger, "watch error"; "error" => %e);
-                let _ = app_die_sender.send(()).await.map_err(|_| {
+                let _ = app_die_sender.send(()).map_err(|_| {
                     warn!(logger, "receiver side not listening");
                 });
                 return;

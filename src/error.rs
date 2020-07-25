@@ -18,6 +18,7 @@ pub enum Error {
     InvalidUserId,
     InvalidServerKind,
     InvalidProto(prost::DecodeError),
+    InvalidAddress(String),
     Config(config::ConfigError),
 }
 
@@ -40,6 +41,7 @@ impl std::fmt::Display for Error {
             Error::InvalidServerKind => write!(f, "invalid server kind"),
             Error::InvalidProto(ref e) => write!(f, "invalid proto: {}", e),
             Error::Config(ref e) => write!(f, "invalid config: {}", e),
+            Error::InvalidAddress(ref s) => write!(f, "invalid address: {}", s),
         }
     }
 }

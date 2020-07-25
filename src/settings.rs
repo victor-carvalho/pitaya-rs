@@ -4,6 +4,28 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Metrics {
+    // The URL where the metrics server will listen in.
+    pub url: String,
+
+    // The path the metrics server will respond to.
+    pub path: String,
+
+    // If the metrics are enabled or not (default true).
+    pub enabled: bool,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self {
+            url: constants::DEFAULT_METRICS_URL.to_owned(),
+            path: constants::DEFAULT_METRICS_PATH.to_owned(),
+            enabled: true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Nats {
     // The url where Nats is located.
     pub url: String,
@@ -75,14 +97,17 @@ pub struct Settings {
     #[serde(with = "humantime_serde")]
     pub shutdown_timeout: Duration,
 
-    // ETCD configuration.
+    // ETCD related settings.
     pub etcd: Etcd,
 
-    // NATS configuration.
+    // NATS related settings.
     pub nats: Nats,
 
     // The kind of this server. For example, "metagame" to represent a metagame server.
     pub server_kind: String,
+
+    // Metrics related settings.
+    pub metrics: Metrics,
 }
 
 impl Default for Settings {
@@ -93,6 +118,7 @@ impl Default for Settings {
             etcd: Default::default(),
             nats: Default::default(),
             server_kind: constants::DEFAULT_SERVER_KIND.to_owned(),
+            metrics: Default::default(),
         }
     }
 }
