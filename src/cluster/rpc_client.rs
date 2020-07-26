@@ -126,8 +126,7 @@ impl RpcClient for NatsClient {
                     .request_timeout(&topic, kick_buffer, request_timeout)
                     .map_err(|e| Error::Nats(e))?;
 
-                let k: protos::KickAnswer =
-                    Message::decode(&message.data[..]).map_err(|e| Error::InvalidProto(e))?;
+                let k: protos::KickAnswer = Message::decode(&message.data[..])?;
                 Ok(k)
             })
             .await??;

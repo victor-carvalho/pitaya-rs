@@ -19,3 +19,4 @@ pub const DEFAULT_SERVER_KIND: &str = "pitaya";
 
 pub const DEFAULT_METRICS_URL: &str = "localhost:8000";
 pub const DEFAULT_METRICS_PATH: &str = "/metrics";
+pub const DEFAULT_METRICS_NAMESPACE: &str = "pitaya";

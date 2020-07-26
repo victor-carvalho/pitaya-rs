@@ -1,29 +1,13 @@
-extern crate async_trait;
-extern crate config;
-extern crate etcd_client;
-extern crate futures;
-extern crate humantime_serde;
-extern crate hyper;
-extern crate lazy_static;
-extern crate nats;
-extern crate prometheus;
-extern crate prost;
-extern crate serde;
-extern crate serde_json;
-extern crate slog;
-extern crate slog_async;
-extern crate slog_json;
-extern crate slog_term;
-extern crate tokio;
-extern crate uuid;
-
+// #![deny(missing_docs)]
 pub mod cluster;
 mod constants;
+pub mod context;
 mod error;
 mod ffi;
 mod metrics;
 mod server;
 pub mod settings;
+
 #[cfg(test)]
 mod test_helpers;
 pub mod utils;
@@ -35,7 +19,7 @@ use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
-    sync::{broadcast, mpsc, oneshot, Mutex},
+    sync::{broadcast, oneshot, Mutex},
     task,
 };
 
@@ -288,9 +272,14 @@ impl Pitaya {
                 .metrics
                 .url
                 .parse()
-                .map_err(|e| Error::InvalidAddress(self.settings.metrics.url.to_string()))?;
+                .map_err(|_e| Error::InvalidAddress(self.settings.metrics.url.to_string()))?;
 
-            let ms = metrics::start_server(self.logger.clone(), addr, app_die_receiver);
+            let ms = metrics::start_server(
+                self.logger.clone(),
+                self.settings.metrics.namespace.clone(),
+                addr,
+                app_die_receiver,
+            );
             self.metrics_server.lock().await.replace(tokio::spawn(ms));
         }
 

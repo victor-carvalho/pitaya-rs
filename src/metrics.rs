@@ -46,6 +46,7 @@ async fn metrics_handler(req: Request<Body>) -> Result<Response<Body>, hyper::ht
 // Starts the metrics server, using a shutdown_signal for graceful shutdown.
 pub async fn start_server(
     logger: slog::Logger,
+    _namespace: String,
     addr: SocketAddr,
     mut shutdown_signal: broadcast::Receiver<()>,
 ) {

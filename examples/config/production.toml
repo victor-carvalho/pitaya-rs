@@ -6,5 +6,6 @@ server_kind = "SuperKind"
 request_timeout = "3s"
 
 [metrics]
+namespace = "pitaya-rs"
 enabled = true
 url = "127.0.0.1:8000"

@@ -31,6 +31,7 @@ prometheus = "0.9"
 prost-build = "0.6.1"
 lazy_static = "1.4.0"
 hyper = "0.13"
+thiserror = "1.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }

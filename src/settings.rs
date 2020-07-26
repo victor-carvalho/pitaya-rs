@@ -5,6 +5,9 @@ use std::time::Duration;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Metrics {
+    // The namespace that will be used when reporting metrics. Default "pitaya".
+    pub namespace: String,
+
     // The URL where the metrics server will listen in.
     pub url: String,
 
@@ -18,6 +21,7 @@ pub struct Metrics {
 impl Default for Metrics {
     fn default() -> Self {
         Self {
+            namespace: constants::DEFAULT_METRICS_NAMESPACE.to_owned(),
             url: constants::DEFAULT_METRICS_URL.to_owned(),
             path: constants::DEFAULT_METRICS_PATH.to_owned(),
             enabled: true,
