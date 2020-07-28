@@ -1,2 +1,5 @@
 debug = true
 server_kind = "my-server-kind-from-c"
+
+[metrics]
+enabled = true

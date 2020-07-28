@@ -1,4 +1,5 @@
 use crate::{cluster, protos, utils, PitayaBuilder, ServerId, ServerKind};
+use etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 use prost::Message;
 use slog::{error, info, o, Drain};
 use std::{
@@ -58,7 +59,7 @@ pub struct PitayaServer {
 }
 
 impl PitayaServer {
-    fn new(server: Arc<crate::Server>) -> Self {
+    fn new(server: Arc<crate::ServerInfo>) -> Self {
         let metadata = serde_json::to_string(&server.metadata)
             .expect("should not fail to convert hashmap to json string");
         Self {
@@ -222,7 +223,7 @@ pub type PitayaHandleRpcCallback = extern "C" fn(*mut c_void, *mut PitayaRpc);
 struct PitayaUserData(*mut c_void);
 
 pub struct Pitaya {
-    pitaya_server: crate::Pitaya,
+    pitaya_server: crate::Pitaya<EtcdLazy, NatsRpcServer, NatsRpcClient>,
     shutdown_receiver: Option<oneshot::Receiver<()>>,
     runtime: tokio::runtime::Runtime,
 }
@@ -497,9 +498,9 @@ pub extern "C" fn pitaya_wait_shutdown_signal(p: *mut Pitaya) {
     let shutdown_receiver = p.shutdown_receiver.take().unwrap();
 
     rt.block_on(async move {
-        let _ = shutdown_receiver.await.map_err(|e| {
+        if let Err(e) = shutdown_receiver.await {
             error!(logger, "failed to wait for shutdown signal: {}", e);
-        });
+        }
     });
 }
 

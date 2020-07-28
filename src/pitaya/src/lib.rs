@@ -1,31 +1,21 @@
-// #![deny(missing_docs)]
-pub mod cluster;
 mod constants;
 pub mod context;
 mod error;
 mod ffi;
-mod metrics;
-mod server;
 pub mod settings;
 
-#[cfg(test)]
-mod test_helpers;
-pub mod utils;
-
-pub use cluster::{discovery::ServiceDiscovery, rpc_client::RpcClient, Rpc};
 pub use error::Error;
-use server::{Server, ServerId, ServerKind};
+pub use etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
+use pitaya_core::cluster::server::{ServerId, ServerInfo, ServerKind};
+use pitaya_core::metrics;
+pub use pitaya_core::{cluster, protos, utils};
 use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
-    sync::{broadcast, oneshot, Mutex},
+    sync::{broadcast, mpsc, oneshot, Mutex},
     task,
 };
-
-pub mod protos {
-    include!(concat!(env!("OUT_DIR"), "/protos.rs"));
-}
 
 #[derive(Debug)]
 struct Route<'a> {
@@ -62,67 +52,63 @@ struct SharedState {
 
 // Pitaya represent a pitaya server.
 // Currently, it only implements cluster mode.
-#[derive(Clone)]
-pub struct Pitaya {
-    service_discovery: Arc<Mutex<cluster::discovery::EtcdLazy>>,
-    nats_rpc_client: cluster::rpc_client::NatsClient,
-    nats_rpc_server: cluster::rpc_server::NatsRpcServer,
+pub struct Pitaya<D, S, C> {
+    discovery: Arc<Mutex<D>>,
+    rpc_server: S,
+    rpc_client: C,
     shared_state: Arc<SharedState>,
     logger: slog::Logger,
     settings: Arc<settings::Settings>,
     metrics_server: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
-impl Pitaya {
+impl<D, S, C> Clone for Pitaya<D, S, C>
+where
+    D: cluster::Discovery + 'static,
+    S: cluster::RpcServer + Clone + 'static,
+    C: cluster::RpcClient + Clone + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            discovery: self.discovery.clone(),
+            rpc_server: self.rpc_server.clone(),
+            rpc_client: self.rpc_client.clone(),
+            shared_state: self.shared_state.clone(),
+            logger: self.logger.clone(),
+            settings: self.settings.clone(),
+            metrics_server: self.metrics_server.clone(),
+        }
+    }
+}
+
+impl<D, S, C> Pitaya<D, S, C>
+where
+    D: cluster::Discovery + 'static,
+    S: cluster::RpcServer + Clone + 'static,
+    C: cluster::RpcClient + Clone + 'static,
+{
     async fn new<'a>(
+        server_info: Arc<ServerInfo>,
         logger: slog::Logger,
         frontend: bool,
-        env_prefix: Option<&'a str>,
-        config_file: Option<&'a str>,
-        base_settings: settings::Settings,
+        discovery: Arc<Mutex<D>>,
+        rpc_server: S,
+        rpc_client: C,
+        settings: settings::Settings,
     ) -> Result<Self, Error> {
-        let settings = settings::Settings::new(base_settings, env_prefix, config_file)?;
-        let nats_settings = Arc::new(settings.nats.clone());
-        let etcd_settings = Arc::new(settings.etcd.clone());
-
         if settings.server_kind.trim().is_empty() {
             return Err(Error::InvalidServerKind);
         }
 
-        let server_id = uuid::Uuid::new_v4().to_string();
-        let this_server = Arc::new(Server {
-            id: ServerId(server_id),
-            kind: ServerKind::from(&settings.server_kind),
-            // TODO(lhahn): fill these options.
-            metadata: HashMap::new(),
-            hostname: "".to_owned(),
-            frontend,
-        });
-
-        debug!(logger, "init"; "settings" => ?settings, "this_server" => ?this_server);
-
-        let nats_rpc_client = cluster::rpc_client::NatsClient::new(
-            logger.new(o!("module" => "rpc_client")),
-            nats_settings.clone(),
-        );
-        let nats_rpc_server = cluster::rpc_server::NatsRpcServer::new(
-            logger.new(o!("module" => "rpc_server")),
-            this_server.clone(),
-            nats_settings,
-            tokio::runtime::Handle::current(),
-        );
-        let service_discovery = {
-            let logger = logger.new(o!("module" => "service_discovery"));
-            cluster::discovery::EtcdLazy::new(logger, this_server.clone(), etcd_settings).await
-        }?;
+        debug!(logger, "init"; "settings" => ?settings, "server_info" => ?server_info);
 
         Ok(Self {
             shared_state: Arc::new(SharedState {
                 tasks: std::sync::Mutex::new(None),
             }),
-            service_discovery: Arc::new(tokio::sync::Mutex::new(service_discovery)),
-            nats_rpc_client,
-            nats_rpc_server,
+            discovery,
+            rpc_client,
+            rpc_server,
             logger,
             settings: Arc::new(settings),
             metrics_server: Arc::new(Mutex::new(None)),
@@ -133,9 +119,10 @@ impl Pitaya {
         &mut self,
         server_id: &ServerId,
         server_kind: &ServerKind,
-    ) -> Result<Option<Arc<Server>>, Error> {
-        let mut service_discovery = self.service_discovery.lock().await;
-        service_discovery.server_by_id(server_id, server_kind).await
+    ) -> Result<Option<Arc<ServerInfo>>, Error> {
+        let mut discovery = self.discovery.lock().await;
+        let server = discovery.server_by_id(server_id, server_kind).await?;
+        Ok(server)
     }
 
     pub async fn shutdown(mut self) -> Result<(), Error> {
@@ -150,14 +137,14 @@ impl Pitaya {
         info!(self.logger, "shutting down pitaya server");
 
         info!(self.logger, "stopping service discovery");
-        self.service_discovery.lock().await.stop().await?;
+        self.discovery.lock().await.shutdown().await?;
         info!(self.logger, "stopped");
 
         info!(self.logger, "stopping rpc client");
-        self.nats_rpc_client.close();
+        self.rpc_client.shutdown().await?;
 
         info!(self.logger, "stopping rpc server");
-        self.nats_rpc_server.stop()?;
+        self.rpc_server.shutdown().await?;
 
         info!(self.logger, "waiting listen for rpc task");
         tasks.listen_for_rpc.await?;
@@ -177,7 +164,7 @@ impl Pitaya {
 
         let server = {
             debug!(self.logger, "getting servers");
-            self.service_discovery
+            self.discovery
                 .lock()
                 .await
                 .server_by_id(server_id, server_kind)
@@ -186,10 +173,11 @@ impl Pitaya {
 
         if let Some(server) = server {
             debug!(self.logger, "sending rpc");
-            self.nats_rpc_client.call(server, req).await.map(|res| {
+            let res = self.rpc_client.call(server, req).await.map(|res| {
                 trace!(self.logger, "received rpc response"; "res" => ?res);
                 res
-            })
+            })?;
+            Ok(res)
         } else {
             Err(Error::NoServersFound(server_kind.clone()))
         }
@@ -207,7 +195,7 @@ impl Pitaya {
 
         debug!(self.logger, "getting servers");
         let servers = self
-            .service_discovery
+            .discovery
             .lock()
             .await
             .servers_by_kind(&server_kind)
@@ -216,13 +204,11 @@ impl Pitaya {
         debug!(self.logger, "getting random server");
         if let Some(random_server) = utils::random_server(&servers) {
             debug!(self.logger, "sending rpc");
-            self.nats_rpc_client
-                .call(random_server, req)
-                .await
-                .map(|res| {
-                    trace!(self.logger, "received rpc response"; "res" => ?res);
-                    res
-                })
+            let res = self.rpc_client.call(random_server, req).await.map(|res| {
+                trace!(self.logger, "received rpc response"; "res" => ?res);
+                res
+            })?;
+            Ok(res)
         } else {
             error!(self.logger, "found no servers for kind"; "kind" => &server_kind.0);
             Err(Error::NoServersFound(server_kind))
@@ -235,9 +221,11 @@ impl Pitaya {
         server_kind: ServerKind,
         kick_msg: protos::KickMsg,
     ) -> Result<protos::KickAnswer, Error> {
-        self.nats_rpc_client
+        let res = self
+            .rpc_client
             .kick_user(server_id, server_kind, kick_msg)
-            .await
+            .await?;
+        Ok(res)
     }
 
     pub async fn send_push_to_user(
@@ -246,9 +234,10 @@ impl Pitaya {
         server_kind: ServerKind,
         push_msg: protos::Push,
     ) -> Result<(), Error> {
-        self.nats_rpc_client
+        self.rpc_client
             .push_to_user(server_id, server_kind, push_msg)
-            .await
+            .await?;
+        Ok(())
     }
 
     async fn start<RpcHandler>(
@@ -272,7 +261,10 @@ impl Pitaya {
                 .metrics
                 .url
                 .parse()
-                .map_err(|_e| Error::InvalidAddress(self.settings.metrics.url.to_string()))?;
+                .map_err(|_e| Error::InvalidAddress {
+                    module: "metrics server".to_string(),
+                    address: self.settings.metrics.url.to_string(),
+                })?;
 
             let ms = metrics::start_server(
                 self.logger.clone(),
@@ -289,12 +281,12 @@ impl Pitaya {
             app_die_sender.subscribe(),
         ));
 
-        self.nats_rpc_client.connect()?;
+        self.rpc_client.start().await?;
 
-        let nats_rpc_server_connection = self.nats_rpc_server.start()?;
+        let rpc_server_connection = self.rpc_server.start().await?;
         let listen_for_rpc = tokio::spawn(Self::start_listen_for_rpc_task(
             self.logger.new(o!("task" => "start_listen_for_rpc")),
-            nats_rpc_server_connection,
+            rpc_server_connection,
             rpc_handler,
         ));
 
@@ -305,11 +297,7 @@ impl Pitaya {
 
         // Always start the service discovery last, since before getting RPCs we need to make
         // sure that the server is set up.
-        self.service_discovery
-            .lock()
-            .await
-            .start(app_die_sender)
-            .await?;
+        self.discovery.lock().await.start(app_die_sender).await?;
 
         info!(self.logger, "finshed starting pitaya server");
         Ok(graceful_shutdown_receiver)
@@ -362,15 +350,13 @@ impl Pitaya {
 
     async fn start_listen_for_rpc_task<RpcHandler>(
         logger: slog::Logger,
-        mut rpc_server_connection: cluster::rpc_server::NatsServerConnection,
+        mut rpc_server_connection: mpsc::Receiver<cluster::Rpc>,
         mut rpc_handler: RpcHandler,
     ) where
         RpcHandler: FnMut(cluster::Rpc) + 'static,
     {
-        use cluster::rpc_server::Connection;
-
         loop {
-            match rpc_server_connection.next_rpc().await {
+            match rpc_server_connection.recv().await {
                 Some(rpc) => {
                     rpc_handler(rpc);
                 }
@@ -387,7 +373,7 @@ impl Pitaya {
         mut subscriber: Box<dyn FnMut(cluster::Notification) + Send + 'static>,
     ) {
         let logger = self.logger.new(o!());
-        let mut subscription = self.service_discovery.lock().await.subscribe();
+        let mut subscription = self.discovery.lock().await.subscribe();
 
         tokio::spawn(async move {
             loop {
@@ -478,14 +464,52 @@ where
         self
     }
 
-    pub async fn build(self) -> Result<(Pitaya, oneshot::Receiver<()>), Error> {
+    pub async fn build(
+        self,
+    ) -> Result<
+        (
+            Pitaya<EtcdLazy, NatsRpcServer, NatsRpcClient>,
+            oneshot::Receiver<()>,
+        ),
+        Error,
+    > {
+        let logger = self
+            .logger
+            .expect("a logger should be passed to PitayaBuilder");
+        let settings =
+            settings::Settings::new(self.base_settings, self.env_prefix, self.config_file)?;
+        let etcd_settings = Arc::new(settings.etcd.clone());
+        let nats_settings = Arc::new(settings.nats.clone());
+        let server_id = uuid::Uuid::new_v4().to_string();
+        let server_info = Arc::new(ServerInfo {
+            id: ServerId(server_id),
+            kind: ServerKind::from(&settings.server_kind),
+            // TODO(lhahn): fill these options.
+            metadata: HashMap::new(),
+            hostname: "".to_owned(),
+            frontend: self.frontend,
+        });
+
+        let discovery = Arc::new(Mutex::new(
+            etcd_nats_cluster::EtcdLazy::new(logger.clone(), server_info.clone(), etcd_settings)
+                .await?,
+        ));
+        let rpc_server = NatsRpcServer::new(
+            logger.clone(),
+            server_info.clone(),
+            nats_settings.clone(),
+            tokio::runtime::Handle::current(),
+        );
+        let rpc_client = NatsRpcClient::new(logger.clone(), nats_settings);
+
         let mut p = Pitaya::new(
-            self.logger
-                .expect("a logger should be passed to PitayaBuilder"),
+            server_info,
+            logger,
             self.frontend,
-            self.env_prefix,
-            self.config_file,
-            self.base_settings,
+            discovery,
+            rpc_server,
+            rpc_client,
+            settings,
         )
         .await?;
 

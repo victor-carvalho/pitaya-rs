@@ -1,19 +1,6 @@
-extern crate cbindgen;
-
 use std::env;
 
 fn main() {
-    prost_build::compile_protos(
-        &[
-            "./pitaya-protos/request.proto",
-            "./pitaya-protos/response.proto",
-            "./pitaya-protos/kick.proto",
-            "./pitaya-protos/push.proto",
-        ],
-        &["./pitaya-protos"],
-    )
-    .expect("failed to compile protos!");
-
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
     let config = cbindgen::Config {

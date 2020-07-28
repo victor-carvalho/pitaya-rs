@@ -1,38 +1,21 @@
-use crate::{error::Error, protos, settings, utils, Server, ServerId, ServerKind};
+use crate::settings;
 use async_trait::async_trait;
+use pitaya_core::{
+    cluster::{Error, RpcClient, ServerId, ServerInfo, ServerKind},
+    protos, utils,
+};
 use prost::Message;
-use slog::{info, trace};
+use slog::{error, info, trace};
 use std::sync::Arc;
 
-#[async_trait]
-pub trait RpcClient {
-    async fn call(
-        &self,
-        target: Arc<Server>,
-        req: protos::Request,
-    ) -> Result<protos::Response, Error>;
-    async fn kick_user(
-        &self,
-        server_id: ServerId,
-        server_kind: ServerKind,
-        kick_msg: protos::KickMsg,
-    ) -> Result<protos::KickAnswer, Error>;
-    async fn push_to_user(
-        &self,
-        server_id: ServerId,
-        server_kind: ServerKind,
-        push_msg: protos::Push,
-    ) -> Result<(), Error>;
-}
-
 #[derive(Clone)]
-pub struct NatsClient {
+pub struct NatsRpcClient {
     settings: Arc<settings::Nats>,
     connection: Option<nats::Connection>,
     logger: slog::Logger,
 }
 
-impl NatsClient {
+impl NatsRpcClient {
     pub fn new(logger: slog::Logger, settings: Arc<settings::Nats>) -> Self {
         Self {
             settings,
@@ -40,33 +23,34 @@ impl NatsClient {
             logger,
         }
     }
+}
 
-    pub fn connect(&mut self) -> Result<(), Error> {
+#[async_trait]
+impl RpcClient for NatsRpcClient {
+    async fn start(&mut self) -> Result<(), Error> {
         assert!(self.connection.is_none());
         info!(self.logger, "client connecting to nats"; "url" => &self.settings.url);
         let nc = nats::ConnectionOptions::new()
             .max_reconnects(Some(self.settings.max_reconnection_attempts as usize))
             .connect(&self.settings.url)
-            .map_err(|e| Error::Nats(e))?;
+            .map_err(Error::Nats)?;
         self.connection = Some(nc);
         Ok(())
     }
 
-    pub fn close(&mut self) {
+    async fn shutdown(&mut self) -> Result<(), Error> {
         if let Some(conn) = self.connection.take() {
             conn.close();
         }
+        Ok(())
     }
-}
 
-#[async_trait]
-impl RpcClient for NatsClient {
     async fn call(
         &self,
-        target: Arc<Server>,
+        target: Arc<ServerInfo>,
         req: protos::Request,
     ) -> Result<protos::Response, Error> {
-        trace!(self.logger, "NatsClient::call");
+        trace!(self.logger, "NatsRpcClient::call");
         let connection = self
             .connection
             .as_ref()
@@ -83,55 +67,71 @@ impl RpcClient for NatsClient {
         let request_timeout = self.settings.request_timeout.clone();
 
         // We do a spawn_blocking here, since it otherwise will block the executor thread.
-        let response = tokio::task::spawn_blocking(move || -> Result<protos::Response, Error> {
+        let res = tokio::task::spawn_blocking(move || -> Result<protos::Response, Error> {
             let message = connection
                 .request_timeout(&topic, buffer, request_timeout)
-                .map_err(|e| Error::Nats(e))?;
-            let msg: protos::Response = Message::decode(message.data.as_ref())?;
+                .map_err(Error::Nats)?;
+            let msg: protos::Response =
+                Message::decode(message.data.as_ref()).map_err(Error::InvalidServerResponse)?;
             Ok(msg)
         })
-        .await??;
+        .await;
 
-        Ok(response)
+        match res {
+            Err(join_error) => {
+                error!(self.logger, "failed to join rpc task"; "error" => %join_error);
+                Err(Error::Internal("failed to join rpc task".to_owned()))
+            }
+            Ok(Err(err)) => Err(err),
+            Ok(Ok(r)) => Ok(r),
+        }
     }
 
     async fn kick_user(
         &self,
+        // NOTE: Ignore server_id, since it is not necessary to create the topic.
         _server_id: ServerId,
         server_kind: ServerKind,
         kick_msg: protos::KickMsg,
     ) -> Result<protos::KickAnswer, Error> {
-        trace!(self.logger, "NatsClient::kick_user");
+        trace!(self.logger, "NatsRpcClient::kick_user");
         let connection = self
             .connection
             .as_ref()
             .cloned()
             .ok_or(Error::NatsConnectionNotOpen)?;
-        // NOTE: Ignore server_id, since it is not necessary to create the topic.
+
         if kick_msg.user_id.is_empty() {
-            return Err(Error::InvalidUserId);
+            return Err(Error::EmptyUserId);
         }
 
         if server_kind.0.is_empty() {
-            return Err(Error::InvalidServerKind);
+            return Err(Error::EmptyServerKind);
         }
 
         let request_timeout = self.settings.request_timeout.clone();
-        let kick_answer =
-            tokio::task::spawn_blocking(move || -> Result<protos::KickAnswer, Error> {
-                let topic = utils::user_kick_topic(&kick_msg.user_id, &server_kind);
-                let kick_buffer = utils::encode_proto(&kick_msg);
+        let res = tokio::task::spawn_blocking(move || -> Result<protos::KickAnswer, Error> {
+            let topic = utils::user_kick_topic(&kick_msg.user_id, &server_kind);
+            let kick_buffer = utils::encode_proto(&kick_msg);
 
-                let message = connection
-                    .request_timeout(&topic, kick_buffer, request_timeout)
-                    .map_err(|e| Error::Nats(e))?;
+            let message = connection
+                .request_timeout(&topic, kick_buffer, request_timeout)
+                .map_err(Error::Nats)?;
 
-                let k: protos::KickAnswer = Message::decode(&message.data[..])?;
-                Ok(k)
-            })
-            .await??;
+            let k: protos::KickAnswer =
+                Message::decode(&message.data[..]).map_err(Error::InvalidServerResponse)?;
+            Ok(k)
+        })
+        .await;
 
-        Ok(kick_answer)
+        match res {
+            Err(join_error) => {
+                error!(self.logger, "failed to join kick task"; "error" => %join_error);
+                Err(Error::Internal("failed to join kick task".to_owned()))
+            }
+            Ok(Err(err)) => Err(err),
+            Ok(Ok(r)) => Ok(r),
+        }
     }
 
     async fn push_to_user(
@@ -141,52 +141,57 @@ impl RpcClient for NatsClient {
         server_kind: ServerKind,
         push_msg: protos::Push,
     ) -> Result<(), Error> {
-        trace!(self.logger, "NatsClient::push_to_user");
+        trace!(self.logger, "NatsRpcClient::push_to_user");
         let connection = self
             .connection
             .as_ref()
             .cloned()
             .ok_or(Error::NatsConnectionNotOpen)?;
         if push_msg.uid.is_empty() {
-            return Err(Error::InvalidUserId);
+            return Err(Error::EmptyUserId);
         }
 
         if server_kind.0.is_empty() {
-            return Err(Error::InvalidServerKind);
+            return Err(Error::EmptyServerKind);
         }
 
         let request_timeout = self.settings.request_timeout.clone();
-        tokio::task::spawn_blocking(move || -> Result<(), Error> {
+        let res = tokio::task::spawn_blocking(move || -> Result<(), Error> {
             let topic = utils::user_messages_topic(&push_msg.uid, &server_kind);
             let push_buffer = utils::encode_proto(&push_msg);
 
             // TODO(lhahn): should we handle the returned message here somehow?
             let _message = connection
                 .request_timeout(&topic, push_buffer, request_timeout)
-                .map_err(|e| Error::Nats(e))?;
+                .map_err(Error::Nats)?;
 
             Ok(())
         })
-        .await??;
+        .await;
 
-        Ok(())
+        match res {
+            Err(join_error) => {
+                error!(self.logger, "failed to join push task"; "error" => %join_error);
+                Err(Error::Internal("failed to join push task".to_owned()))
+            }
+            Ok(Err(err)) => Err(err),
+            Ok(Ok(_)) => Ok(()),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        cluster::discovery::{EtcdLazy, ServiceDiscovery},
-        constants, test_helpers, ServerId, ServerKind,
-    };
+    use crate::{constants, discovery::EtcdLazy};
+    use pitaya_core::cluster::Discovery;
     use std::collections::HashMap;
     use std::error::Error as StdError;
     use std::time::Duration;
 
     #[test]
     fn nats_rpc_client_can_be_created() {
-        let _client = NatsClient::new(
+        let _client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
             Arc::new(settings::Nats {
                 url: "https://sfdjsdoifj".to_owned(),
@@ -195,32 +200,32 @@ mod tests {
         );
     }
 
-    #[test]
+    #[tokio::test]
     #[should_panic]
-    fn nats_fails_connection() {
-        let mut client = NatsClient::new(
+    async fn nats_fails_connection() {
+        let mut client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
             Arc::new(settings::Nats {
                 url: "https://nats-io.server:3241".to_owned(),
                 ..Default::default()
             }),
         );
-        client.connect().unwrap();
-        client.close();
+        client.start().await.unwrap();
+        client.shutdown().await.unwrap();
     }
 
     #[tokio::test]
     async fn nats_request_timeout() -> Result<(), Error> {
-        let mut client = NatsClient::new(
+        let mut client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
             Arc::new(settings::Nats {
                 request_timeout: Duration::from_millis(300),
                 ..Default::default()
             }),
         );
-        client.connect()?;
+        client.start().await?;
 
-        let target_server = Arc::new(Server {
+        let target_server = Arc::new(ServerInfo {
             id: ServerId::from("my_id"),
             kind: ServerKind::from("metagame"),
             metadata: HashMap::new(),
@@ -256,14 +261,14 @@ mod tests {
             _ => panic!("unexpected error"),
         };
 
-        client.close();
+        client.shutdown().await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn nats_request_works() -> Result<(), Box<dyn StdError>> {
-        async fn start_service_disovery() -> Result<EtcdLazy, etcd_client::Error> {
-            let sv = Arc::new(Server {
+        async fn start_service_disovery() -> Result<EtcdLazy, Error> {
+            let sv = Arc::new(ServerInfo {
                 id: ServerId::from("1234567"),
                 kind: ServerKind::from("room"),
                 frontend: false,
@@ -284,14 +289,14 @@ mod tests {
 
         let mut service_discovery = start_service_disovery().await?;
 
-        let mut client = NatsClient::new(
+        let mut client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
             Arc::new(settings::Nats {
                 request_timeout: Duration::from_millis(300),
                 ..Default::default()
             }),
         );
-        client.connect()?;
+        client.start().await?;
 
         let servers_by_kind = service_discovery
             .servers_by_kind(&ServerKind::from("room"))
@@ -328,7 +333,7 @@ mod tests {
         let data_str = String::from_utf8_lossy(&response.data);
         assert!(data_str.contains("success"));
 
-        client.close();
+        client.shutdown().await?;
         Ok(())
     }
 }

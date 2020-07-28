@@ -1,24 +1,24 @@
-use super::{Server, ServerKind};
+use crate::cluster::{ServerInfo, ServerKind};
 use rand::Rng;
 use std::sync::Arc;
 
-pub(crate) fn user_kick_topic(user_id: &str, server_kind: &ServerKind) -> String {
+pub fn user_kick_topic(user_id: &str, server_kind: &ServerKind) -> String {
     format!("pitaya/{}/user/{}/kick", server_kind.0, user_id)
 }
 
-pub(crate) fn user_messages_topic(user_id: &str, server_kind: &ServerKind) -> String {
+pub fn user_messages_topic(user_id: &str, server_kind: &ServerKind) -> String {
     format!("pitaya/{}/user/{}/push", server_kind.0, user_id)
 }
 
-pub(crate) fn topic_for_server(server: &Server) -> String {
+pub fn topic_for_server(server: &ServerInfo) -> String {
     format!("pitaya/servers/{}/{}", server.kind.0, server.id.0)
 }
 
-pub(crate) fn server_kind_prefix(server_kind: &ServerKind) -> String {
+pub fn server_kind_prefix(server_kind: &ServerKind) -> String {
     format!("pitaya/servers/{}/", server_kind.0)
 }
 
-pub(crate) fn random_server(servers: &[Arc<Server>]) -> Option<Arc<Server>> {
+pub fn random_server(servers: &[Arc<ServerInfo>]) -> Option<Arc<ServerInfo>> {
     if servers.is_empty() {
         None
     } else {

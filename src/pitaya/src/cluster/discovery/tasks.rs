@@ -146,9 +146,9 @@ pub(super) async fn watch_task(
                 // FIXME, TODO(lhahn): should we send an event to kill the pod here?
                 // panic!("failed to get watch message: {}", e);
                 error!(logger, "watch error"; "error" => %e);
-                let _ = app_die_sender.send(()).map_err(|_| {
+                if let Err(_) = app_die_sender.send(()) {
                     warn!(logger, "receiver side not listening");
-                });
+                }
                 return;
             }
         }
@@ -166,7 +166,7 @@ fn parse_server_kind_and_id(prefix: &str, string: &str) -> Option<(ServerKind, S
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

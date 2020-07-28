@@ -1,4 +1,4 @@
-use crate::ServerKind;
+use crate::{cluster, ServerKind};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,9 +21,6 @@ pub enum Error {
     #[error("nats: {0}")]
     Nats(std::io::Error),
 
-    #[error("etcd: {0}")]
-    Etcd(#[from] etcd_client::Error),
-
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
 
@@ -45,12 +42,15 @@ pub enum Error {
     #[error("invalid server kind")]
     InvalidServerKind,
 
-    #[error("invalid address {0}")]
-    InvalidAddress(String),
+    #[error("invalid address for {module}: {address}")]
+    InvalidAddress { module: String, address: String },
 
     #[error("config error: {0}")]
     Config(#[from] config::ConfigError),
 
     #[error("invalid context")]
     InvalidContext,
+
+    #[error("cluster: {0}")]
+    Cluster(#[from] cluster::Error),
 }

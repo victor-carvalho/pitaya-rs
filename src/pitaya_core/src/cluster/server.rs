@@ -38,7 +38,7 @@ where
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct Server {
+pub struct ServerInfo {
     pub id: ServerId,
     #[serde(rename = "type")]
     pub kind: ServerKind,
@@ -48,12 +48,12 @@ pub struct Server {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]
     fn server_serialize() -> Result<(), serde_json::Error> {
-        let sv = Server {
+        let sv = ServerInfo {
             id: ServerId::from("randomId"),
             kind: ServerKind::from("metagame"),
             metadata: vec![("my_key1".to_owned(), "my_val1".to_owned())]

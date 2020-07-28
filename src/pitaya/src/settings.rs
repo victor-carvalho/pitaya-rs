@@ -14,7 +14,7 @@ pub struct Metrics {
     // The path the metrics server will respond to.
     pub path: String,
 
-    // If the metrics are enabled or not (default true).
+    // If the metrics are enabled or not (default is false).
     pub enabled: bool,
 }
 
@@ -24,68 +24,7 @@ impl Default for Metrics {
             namespace: constants::DEFAULT_METRICS_NAMESPACE.to_owned(),
             url: constants::DEFAULT_METRICS_URL.to_owned(),
             path: constants::DEFAULT_METRICS_PATH.to_owned(),
-            enabled: true,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct Nats {
-    // The url where Nats is located.
-    pub url: String,
-
-    // How long to wait until the connection request times out.
-    #[serde(with = "humantime_serde")]
-    pub connection_timeout: Duration,
-
-    // How long to wait until the request times out.
-    #[serde(with = "humantime_serde")]
-    pub request_timeout: Duration,
-
-    // The maximum amount of times the nats client will atempt to reconnect.
-    pub max_reconnection_attempts: u32,
-
-    // The maximum amount of rpcs queued that a nats server will have.
-    // If this amount is passed, RPCs will fail.
-    pub max_rpcs_queued: u32,
-}
-
-impl Default for Nats {
-    fn default() -> Self {
-        Self {
-            url: constants::LOCAL_NATS_URL.to_owned(),
-            connection_timeout: constants::DEFAULT_NATS_CONN_TIMEOUT,
-            request_timeout: constants::DEFAULT_NATS_REQUEST_TIMEOUT,
-            max_reconnection_attempts: constants::DEFAULT_NATS_MAX_RECONN_ATTEMPTS,
-            max_rpcs_queued: constants::DEFAULT_NATS_MAX_RPCS_QUEUED,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct Etcd {
-    // The URL where the ETCD instance is located at.
-    pub url: String,
-
-    // The prefix where all keys are going to be stored in ETCD.
-    // This will tipically be the name of your app.
-    pub prefix: String,
-
-    // How long should the lease TTL be for this server.
-    // In practice, long values imply less requests to ETCD to
-    // update the lease, however, if something bad happens, like a crash,
-    // the server will be registered for service discovery even though it is
-    // not running anymore.
-    #[serde(with = "humantime_serde")]
-    pub lease_ttl: Duration,
-}
-
-impl Default for Etcd {
-    fn default() -> Self {
-        Self {
-            url: constants::LOCAL_ETCD_URL.to_owned(),
-            prefix: constants::DEFAULT_ETCD_PREFIX.to_owned(),
-            lease_ttl: constants::DEFAULT_ETCD_LEASE_TTL,
+            enabled: false,
         }
     }
 }
@@ -102,10 +41,10 @@ pub struct Settings {
     pub shutdown_timeout: Duration,
 
     // ETCD related settings.
-    pub etcd: Etcd,
+    pub etcd: etcd_nats_cluster::settings::Etcd,
 
     // NATS related settings.
-    pub nats: Nats,
+    pub nats: etcd_nats_cluster::settings::Nats,
 
     // The kind of this server. For example, "metagame" to represent a metagame server.
     pub server_kind: String,

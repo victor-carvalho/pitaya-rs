@@ -58,7 +58,7 @@ async fn main() {
         .await
         .expect("failed to wait for shutdown receiver");
 
-    let _ = pitaya_server.shutdown().await.map_err(|e| {
+    if let Err(e) = pitaya_server.shutdown().await {
         error!(logger, "failed to shutdown pitaya: {}", e);
-    });
+    }
 }
