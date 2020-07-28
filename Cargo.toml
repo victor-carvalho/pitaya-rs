@@ -6,3 +6,5 @@ members = [
     "src/test_helpers",
 ]
 
+[profile.release]
+lto = true
