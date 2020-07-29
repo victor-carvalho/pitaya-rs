@@ -25,4 +25,4 @@ makers undeps
 
 # FAQ
 ## Go can be compiled into a dynamic library as well, why not use that?
-Even Go can be compiled into a shared library and used with a C FFI interface as well, in practice we found many problems. The main issues are the conflict between the host language and the Go language runtime that is embedded into the final compiled binary. We can avoid that by using Rust, since it does not come with a runtime.
+Even though Go can be compiled into a shared library and used with a C FFI interface as well, in practice we found many problems. The main issues are the conflict between the host language and the Go language runtime that is embedded into the final compiled binary. We can avoid that by using Rust, since it does not come with a runtime.
