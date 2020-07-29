@@ -540,7 +540,7 @@ mod tests {
 
         // Wait a little bit, otherwise we'll have a rece condition reading both
         // RwLocks below.
-        tokio::time::delay_for(Duration::from_millis(100)).await;
+        tokio::time::delay_for(Duration::from_millis(500)).await;
 
         assert_eq!(servers_added.read().unwrap().len(), 0);
         assert_eq!(servers_removed.read().unwrap().len(), 0);
