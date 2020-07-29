@@ -38,7 +38,7 @@ read_string(pb_istream_t *stream, const pb_field_t *field, void **arg)
 }
 
 static void
-handle_rpc(void *data, PitayaRpc *rpc)
+handle_rpc(void *data, PitayaContext *ctx, PitayaRpc *rpc)
 {
     printf("======================= RECEIVED RPC!!!!\n");
     fflush(stdout);
@@ -62,10 +62,10 @@ handle_rpc(void *data, PitayaRpc *rpc)
 }
 
 static void
-on_cluster_notification(void *user_data, PitayaClusterNotification notification, PitayaServer *server)
+on_cluster_notification(void *user_data, PitayaClusterNotification notification, PitayaServerInfo *server_info)
 {
     printf("====> received notification: %d\n", notification);
-    pitaya_server_drop(server);
+    pitaya_server_drop(server_info);
 }
 
 static void
@@ -94,11 +94,11 @@ send_rpc_callback(void *userData, PitayaError *err, PitayaBuffer *response)
 }
 
 static void
-server_by_id_callback(void *user_data, PitayaServer *server)
+server_by_id_callback(void *user_data, PitayaServerInfo *server_info)
 {
-    if (server) {
-        printf("Server was found!: id=%s\n", pitaya_server_id(server));
-        pitaya_server_drop(server);
+    if (server_info) {
+        printf("Server was found!: id=%s\n", pitaya_server_id(server_info));
+        pitaya_server_drop(server_info);
     } else {
         printf("Server was NOT found!\n");
     }
@@ -112,7 +112,7 @@ log_function(void *ctx, char *msg)
 
 int main()
 {
-    PitayaServer *server = pitaya_server_new(
+    PitayaServerInfo *server = pitaya_server_new(
         "my-server-id-from-c",
         "my-server-kind-from-c",
         "random-metadata",

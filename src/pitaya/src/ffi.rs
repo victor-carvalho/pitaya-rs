@@ -1,7 +1,7 @@
-use crate::{cluster, protos, utils, PitayaBuilder, ServerId, ServerKind};
+use crate::{cluster, context, protos, utils, PitayaBuilder, ServerId, ServerKind};
 use etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 use prost::Message;
-use slog::{error, info, o, Drain};
+use slog::{error, o, Drain};
 use std::{
     borrow::Cow,
     convert::TryFrom,
@@ -48,9 +48,9 @@ pub extern "C" fn pitaya_error_drop(error: *mut PitayaError) {
 }
 
 //
-// PitayaServer struct
+// PitayaServerInfo struct
 //
-pub struct PitayaServer {
+pub struct PitayaServerInfo {
     id: CString,
     kind: CString,
     metadata: CString,
@@ -58,7 +58,7 @@ pub struct PitayaServer {
     frontend: i32,
 }
 
-impl PitayaServer {
+impl PitayaServerInfo {
     fn new(server: Arc<crate::ServerInfo>) -> Self {
         let metadata = serde_json::to_string(&server.metadata)
             .expect("should not fail to convert hashmap to json string");
@@ -83,12 +83,12 @@ pub extern "C" fn pitaya_server_new(
     metadata: *mut c_char,
     hostname: *mut c_char,
     frontend: i32,
-) -> *mut PitayaServer {
+) -> *mut PitayaServerInfo {
     let id = unsafe { CStr::from_ptr(id) };
     let kind = unsafe { CStr::from_ptr(kind) };
     let metadata_str = unsafe { CStr::from_ptr(metadata) };
     let hostname = unsafe { CStr::from_ptr(hostname) };
-    Box::into_raw(Box::new(PitayaServer {
+    Box::into_raw(Box::new(PitayaServerInfo {
         id: id.to_owned(),
         kind: kind.to_owned(),
         metadata: metadata_str.to_owned(),
@@ -98,41 +98,41 @@ pub extern "C" fn pitaya_server_new(
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_server_id(server: *mut PitayaServer) -> *const c_char {
+pub extern "C" fn pitaya_server_id(server: *mut PitayaServerInfo) -> *const c_char {
     let server = unsafe { mem::ManuallyDrop::new(Box::from_raw(server)) };
     let id = server.id.as_ptr();
     id as *const c_char
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_server_kind(server: *mut PitayaServer) -> *const c_char {
+pub extern "C" fn pitaya_server_kind(server: *mut PitayaServerInfo) -> *const c_char {
     let server = unsafe { mem::ManuallyDrop::new(Box::from_raw(server)) };
     let kind = server.kind.as_ptr();
     kind as *const c_char
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_server_metadata(server: *mut PitayaServer) -> *const c_char {
+pub extern "C" fn pitaya_server_metadata(server: *mut PitayaServerInfo) -> *const c_char {
     let server = unsafe { mem::ManuallyDrop::new(Box::from_raw(server)) };
     let metadata = server.metadata.as_ptr();
     metadata as *const c_char
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_server_hostname(server: *mut PitayaServer) -> *const c_char {
+pub extern "C" fn pitaya_server_hostname(server: *mut PitayaServerInfo) -> *const c_char {
     let server = unsafe { mem::ManuallyDrop::new(Box::from_raw(server)) };
     let hostname = server.hostname.as_ptr();
     hostname as *const c_char
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_server_frontend(server: *mut PitayaServer) -> i32 {
+pub extern "C" fn pitaya_server_frontend(server: *mut PitayaServerInfo) -> i32 {
     let server = unsafe { mem::ManuallyDrop::new(Box::from_raw(server)) };
     server.frontend
 }
 
 #[no_mangle]
-pub extern "C" fn pitaya_server_drop(pitaya_server: *mut PitayaServer) {
+pub extern "C" fn pitaya_server_drop(pitaya_server: *mut PitayaServerInfo) {
     let _ = unsafe { Box::from_raw(pitaya_server) };
 }
 
@@ -214,10 +214,21 @@ pub enum PitayaClusterNotification {
     ServerRemoved = 1,
 }
 
-pub type PitayaClusterNotificationCallback =
-    extern "C" fn(*mut c_void, PitayaClusterNotification, *mut PitayaServer);
+pub struct PitayaContext {
+    #[allow(dead_code)]
+    ctx: context::Context,
+}
 
-pub type PitayaHandleRpcCallback = extern "C" fn(*mut c_void, *mut PitayaRpc);
+impl std::convert::From<context::Context> for PitayaContext {
+    fn from(ctx: context::Context) -> Self {
+        Self { ctx }
+    }
+}
+
+pub type PitayaClusterNotificationCallback =
+    extern "C" fn(*mut c_void, PitayaClusterNotification, *mut PitayaServerInfo);
+
+pub type PitayaHandleRpcCallback = extern "C" fn(*mut c_void, *mut PitayaContext, *mut PitayaRpc);
 
 #[derive(Debug, Clone, Copy)]
 struct PitayaUserData(*mut c_void);
@@ -233,7 +244,7 @@ pub extern "C" fn pitaya_server_by_id(
     p: *mut Pitaya,
     server_id: *mut c_char,
     server_kind: *mut c_char,
-    callback: extern "C" fn(*mut c_void, *mut PitayaServer),
+    callback: extern "C" fn(*mut c_void, *mut PitayaServerInfo),
     user_data: *mut c_void,
 ) {
     let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
@@ -262,7 +273,7 @@ pub extern "C" fn pitaya_server_by_id(
             .await
         {
             Ok(Some(sv)) => {
-                let sv = Box::into_raw(Box::new(PitayaServer::new(sv)));
+                let sv = Box::into_raw(Box::new(PitayaServerInfo::new(sv)));
                 callback(user_data.0, sv);
             }
             Ok(None) => {
@@ -367,7 +378,7 @@ impl std::io::Write for FunctionWriter {
 
 #[no_mangle]
 pub extern "C" fn pitaya_initialize_with_nats(
-    ctx: *mut c_void,
+    user_ctx: *mut c_void,
     env_prefix: *mut c_char,
     config_file: *mut c_char,
     handle_rpc_cb: PitayaHandleRpcCallback,
@@ -387,7 +398,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
 
     // This wrapper type is necessary in order to send it to
     // another thread.
-    let ctx = PitayaUserData(ctx);
+    let user_ctx = PitayaUserData(user_ctx);
     let log_ctx = PitayaUserData(log_ctx);
 
     let root_logger = match log_kind {
@@ -415,9 +426,6 @@ pub extern "C" fn pitaya_initialize_with_nats(
     };
 
     let logger = root_logger.clone();
-    let rpc_handler_logger = root_logger.new(o!());
-
-    info!(root_logger, "initializing global pitaya server");
 
     let mut runtime = tokio::runtime::Runtime::new().expect("should not fail to create a runtime");
 
@@ -426,33 +434,29 @@ pub extern "C" fn pitaya_initialize_with_nats(
             .with_env_prefix(&env_prefix.to_string_lossy())
             .with_config_file(&config_file.to_string_lossy())
             .with_logger(root_logger)
-            .with_rpc_handler(move |mut rpc| {
-                info!(
-                    rpc_handler_logger,
-                    "!!!!!!!! received rpc req: {:?}",
-                    rpc.request()
-                );
+            .with_rpc_handler(move |ctx, rpc| {
                 let request_buffer = utils::encode_proto(rpc.request());
                 let rpc = Box::into_raw(Box::new(PitayaRpc {
                     request: request_buffer,
                     responder: rpc.responder(),
                 }));
-                handle_rpc_cb(ctx.0, rpc);
+                let pitaya_ctx = Box::into_raw(Box::new(PitayaContext::from(ctx)));
+                handle_rpc_cb(user_ctx.0, pitaya_ctx, rpc);
             })
             .with_cluster_subscriber({
                 move |notification| match notification {
                     cluster::Notification::ServerAdded(server) => {
-                        let raw_server = Box::into_raw(Box::new(PitayaServer::new(server)));
+                        let raw_server = Box::into_raw(Box::new(PitayaServerInfo::new(server)));
                         cluster_notification_callback(
-                            ctx.0,
+                            user_ctx.0,
                             PitayaClusterNotification::ServerAdded,
                             raw_server,
                         );
                     }
                     cluster::Notification::ServerRemoved(server) => {
-                        let raw_server = Box::into_raw(Box::new(PitayaServer::new(server)));
+                        let raw_server = Box::into_raw(Box::new(PitayaServerInfo::new(server)));
                         cluster_notification_callback(
-                            ctx.0,
+                            user_ctx.0,
                             PitayaClusterNotification::ServerRemoved,
                             raw_server,
                         );

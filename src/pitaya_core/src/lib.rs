@@ -1,4 +1,5 @@
 pub mod cluster;
+pub mod context;
 pub mod metrics;
 pub mod utils;
 pub mod protos {

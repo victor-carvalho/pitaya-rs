@@ -84,7 +84,7 @@ async fn main() {
         .with_logger(root_logger)
         .with_rpc_handler({
             let logger = logger.clone();
-            move |mut rpc| {
+            move |ctx, mut rpc| {
                 info!(logger, "!!!!!!!! received rpc req: {:?}", rpc.request());
                 let res = pitaya::protos::Response {
                     data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),

@@ -78,7 +78,7 @@ namespace NPitaya
             );
         }
 
-        private static void HandleRpcCallback(IntPtr userData, IntPtr rpc)
+        private static void HandleRpcCallback(IntPtr userData, IntPtr ctx, IntPtr rpc)
         {
             Int32 len;
             IntPtr rawData = pitaya_rpc_request(rpc, out len);

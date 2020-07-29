@@ -1,5 +1,4 @@
 mod constants;
-pub mod context;
 mod error;
 mod ffi;
 pub mod settings;
@@ -7,8 +6,8 @@ pub mod settings;
 pub use error::Error;
 pub use etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 use pitaya_core::cluster::server::{ServerId, ServerInfo, ServerKind};
-use pitaya_core::metrics;
 pub use pitaya_core::{cluster, protos, utils};
+use pitaya_core::{context, metrics};
 use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc};
@@ -50,8 +49,7 @@ struct SharedState {
     tasks: std::sync::Mutex<Option<Tasks>>,
 }
 
-// Pitaya represent a pitaya server.
-// Currently, it only implements cluster mode.
+/// Pitaya represent a pitaya server.
 pub struct Pitaya<D, S, C> {
     discovery: Arc<Mutex<D>>,
     rpc_server: S,
@@ -90,7 +88,6 @@ where
     async fn new<'a>(
         server_info: Arc<ServerInfo>,
         logger: slog::Logger,
-        frontend: bool,
         discovery: Arc<Mutex<D>>,
         rpc_server: S,
         rpc_client: C,
@@ -245,7 +242,7 @@ where
         rpc_handler: RpcHandler,
     ) -> Result<oneshot::Receiver<()>, Error>
     where
-        RpcHandler: FnMut(cluster::Rpc) + Send + 'static,
+        RpcHandler: FnMut(context::Context, cluster::Rpc) + Send + 'static,
     {
         info!(self.logger, "starting pitaya server");
 
@@ -353,13 +350,28 @@ where
         mut rpc_server_connection: mpsc::Receiver<cluster::Rpc>,
         mut rpc_handler: RpcHandler,
     ) where
-        RpcHandler: FnMut(cluster::Rpc) + 'static,
+        RpcHandler: FnMut(context::Context, cluster::Rpc) + 'static,
     {
         loop {
             match rpc_server_connection.recv().await {
-                Some(rpc) => {
-                    rpc_handler(rpc);
-                }
+                Some(rpc) => match context::Context::try_from(rpc.request()) {
+                    Ok(ctx) => {
+                        rpc_handler(ctx, rpc);
+                    }
+                    Err(e) => {
+                        let response = protos::Response {
+                            error: Some(protos::Error {
+                                code: constants::CODE_BAD_FORMAT.to_string(),
+                                msg: format!("invalid request: {}", e),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        };
+                        if !rpc.respond(response) {
+                            error!(logger, "failed to respond to rpc");
+                        }
+                    }
+                },
                 None => {
                     debug!(logger, "listen rpc task exiting");
                     break;
@@ -412,7 +424,7 @@ pub struct PitayaBuilder<'a, RpcHandler> {
 
 impl<'a, RpcHandler> PitayaBuilder<'a, RpcHandler>
 where
-    RpcHandler: FnMut(cluster::Rpc) + Send + 'static,
+    RpcHandler: FnMut(context::Context, cluster::Rpc) + Send + 'static,
 {
     pub fn new() -> Self {
         Self {
@@ -505,7 +517,6 @@ where
         let mut p = Pitaya::new(
             server_info,
             logger,
-            self.frontend,
             discovery,
             rpc_server,
             rpc_client,

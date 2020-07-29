@@ -5,6 +5,9 @@ fn main() {
 
     let config = cbindgen::Config {
         tab_width: 4,
+        // FIXME(lhahn): this is a workaround for cbindgen, since it was not generating
+        // the forward declarations for pitaya.
+        after_includes: Some(String::from("\ntypedef struct Pitaya Pitaya;")),
         language: cbindgen::Language::C,
         enumeration: cbindgen::EnumConfig {
             prefix_with_name: true,

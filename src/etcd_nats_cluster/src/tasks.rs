@@ -170,7 +170,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_server_kind_and_id() {
+    fn works() {
         let s = "pitaya/servers/room/912ebcec-71ec-49b9-95f9-e188e16afa51";
         assert_eq!(
             parse_server_kind_and_id("pitaya", s),

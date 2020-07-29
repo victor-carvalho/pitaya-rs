@@ -1,5 +1,6 @@
-use crate::protos;
+use crate::{context, protos};
 use async_trait::async_trait;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -136,7 +137,7 @@ impl Rpc {
         Self { req, responder }
     }
 
-    pub fn request(&mut self) -> &protos::Request {
+    pub fn request(&self) -> &protos::Request {
         &self.req
     }
 

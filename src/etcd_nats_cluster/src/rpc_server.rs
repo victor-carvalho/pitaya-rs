@@ -100,13 +100,12 @@ impl NatsRpcServer {
                 };
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
-                // TODO(lhahn): respond 502 here, and add metric.
                 warn!(logger, "channel is full, dropping request");
                 if let Some((ref mut conn, _)) = conn.lock().unwrap().deref_mut() {
                     let response = protos::Response {
                         error: Some(protos::Error {
-                            code: "PIT-502".to_string(),
-                            msg: "server is overwhelmed".to_string(),
+                            code: "PIT-503".to_string(),
+                            msg: "server is overloaded".to_string(),
                             ..Default::default()
                         }),
                         ..Default::default()

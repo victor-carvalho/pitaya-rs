@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+typedef struct Pitaya Pitaya;
+
 typedef enum {
     PitayaClusterNotification_ServerAdded = 0,
     PitayaClusterNotification_ServerRemoved = 1,
@@ -25,15 +27,17 @@ typedef enum {
 
 typedef struct PitayaBuffer PitayaBuffer;
 
+typedef struct PitayaContext PitayaContext;
+
 typedef struct PitayaError PitayaError;
 
 typedef struct PitayaRpc PitayaRpc;
 
-typedef struct PitayaServer PitayaServer;
+typedef struct PitayaServerInfo PitayaServerInfo;
 
-typedef void (*PitayaHandleRpcCallback)(void*, PitayaRpc*);
+typedef void (*PitayaHandleRpcCallback)(void*, PitayaContext*, PitayaRpc*);
 
-typedef void (*PitayaClusterNotificationCallback)(void*, PitayaClusterNotification, PitayaServer*);
+typedef void (*PitayaClusterNotificationCallback)(void*, PitayaClusterNotification, PitayaServerInfo*);
 
 const uint8_t *pitaya_buffer_data(PitayaBuffer *buf, int32_t *len);
 
@@ -47,7 +51,7 @@ void pitaya_error_drop(PitayaError *error);
 
 const char *pitaya_error_message(PitayaError *err);
 
-PitayaError *pitaya_initialize_with_nats(void *ctx,
+PitayaError *pitaya_initialize_with_nats(void *user_ctx,
                                          char *env_prefix,
                                          char *config_file,
                                          PitayaHandleRpcCallback handle_rpc_cb,
@@ -88,26 +92,26 @@ void pitaya_send_rpc(Pitaya *p,
 void pitaya_server_by_id(Pitaya *p,
                          char *server_id,
                          char *server_kind,
-                         void (*callback)(void*, PitayaServer*),
+                         void (*callback)(void*, PitayaServerInfo*),
                          void *user_data);
 
-void pitaya_server_drop(PitayaServer *pitaya_server);
+void pitaya_server_drop(PitayaServerInfo *pitaya_server);
 
-int32_t pitaya_server_frontend(PitayaServer *server);
+int32_t pitaya_server_frontend(PitayaServerInfo *server);
 
-const char *pitaya_server_hostname(PitayaServer *server);
+const char *pitaya_server_hostname(PitayaServerInfo *server);
 
-const char *pitaya_server_id(PitayaServer *server);
+const char *pitaya_server_id(PitayaServerInfo *server);
 
-const char *pitaya_server_kind(PitayaServer *server);
+const char *pitaya_server_kind(PitayaServerInfo *server);
 
-const char *pitaya_server_metadata(PitayaServer *server);
+const char *pitaya_server_metadata(PitayaServerInfo *server);
 
-PitayaServer *pitaya_server_new(char *id,
-                                char *kind,
-                                char *metadata,
-                                char *hostname,
-                                int32_t frontend);
+PitayaServerInfo *pitaya_server_new(char *id,
+                                    char *kind,
+                                    char *metadata,
+                                    char *hostname,
+                                    int32_t frontend);
 
 void pitaya_shutdown(Pitaya *p);
 

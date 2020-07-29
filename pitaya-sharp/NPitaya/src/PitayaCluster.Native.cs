@@ -24,7 +24,7 @@ namespace NPitaya
         private delegate void LogFunction(IntPtr context, IntPtr msg);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void HandleRpcCallbackFunc(IntPtr userData, IntPtr rpc);
+        private delegate void HandleRpcCallbackFunc(IntPtr userData, IntPtr ctx, IntPtr rpc);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void ClusterNotificationCallbackFunc(IntPtr userData, NotificationType notificationType, IntPtr data);
