@@ -9,9 +9,18 @@ name = "pitaya"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
+[[bench]]
+name = "self_rpc_call"
+harness = false
+
+[[bench]]
+name = "rpc_call"
+harness = false
+
 [dependencies]
 pitaya_core = { path = "../pitaya_core" }
 etcd_nats_cluster = { path = "../etcd_nats_cluster" }
+prometheus_metrics = { path = "../prometheus_metrics" }
 test_helpers = { path = "../test_helpers" }
 
 prost = "0.6.1"
@@ -33,7 +42,8 @@ thiserror = "1.0"
 openssl = { version = "0.10", features = ["vendored"] }
 
 [dev-dependencies]
-mockall = "0.7.1"
+mockall = "0.7"
+criterion = "0.3"
 
 [build-dependencies]
 cbindgen = "0.14"

@@ -34,8 +34,9 @@ pub(super) async fn lease_keep_alive(
                     return;
                 }
                 match stream.message().await {
-                    Err(_) => {
-                        error!(logger, "failed to get keep alive response");
+                    Err(err) => {
+                        error!(logger, "failed to get keep alive response"; "error" => %err);
+                        return;
                     }
                     Ok(msg) => {
                         if let Some(response) = msg {
@@ -49,6 +50,7 @@ pub(super) async fn lease_keep_alive(
                         } else {
                             // TODO(lhahn): what to do here?
                             warn!(logger, "received empty lease keep alive response");
+                            return;
                         }
                     }
                 }

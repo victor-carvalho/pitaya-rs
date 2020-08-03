@@ -23,6 +23,14 @@ cargo test
 makers undeps
 ```
 
+# Benchmarks
+The default command for benchmarks is the following:
+```
+cargo bench --verbose
+```
+
+**NOTE**: Currently benchmarks are not really helpful, since they depend on external systems, that way we're not only testing the rust code, which is not that helpful. An improvement here will be by using stubs instead of the real implementations.
+
 # FAQ
 ## Go can be compiled into a dynamic library as well, why not use that?
 Even though Go can be compiled into a shared library and used with a C FFI interface as well, in practice we found many problems. The main issues are the conflict between the host language and the Go language runtime that is embedded into the final compiled binary. We can avoid that by using Rust, since it does not come with a runtime.

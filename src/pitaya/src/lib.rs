@@ -6,13 +6,13 @@ pub mod settings;
 pub use error::Error;
 pub use etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 use pitaya_core::cluster::server::{ServerId, ServerInfo, ServerKind};
-pub use pitaya_core::{cluster, protos, utils};
-use pitaya_core::{context, metrics};
+use pitaya_core::context;
+pub use pitaya_core::{cluster, metrics, protos, utils};
 use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
-    sync::{broadcast, mpsc, oneshot, Mutex},
+    sync::{broadcast, mpsc, oneshot, Mutex, RwLock},
     task,
 };
 
@@ -57,7 +57,7 @@ pub struct Pitaya<D, S, C> {
     shared_state: Arc<SharedState>,
     logger: slog::Logger,
     settings: Arc<settings::Settings>,
-    metrics_server: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    metrics_reporter: metrics::ThreadSafeReporter,
 }
 
 impl<D, S, C> Clone for Pitaya<D, S, C>
@@ -74,7 +74,7 @@ where
             shared_state: self.shared_state.clone(),
             logger: self.logger.clone(),
             settings: self.settings.clone(),
-            metrics_server: self.metrics_server.clone(),
+            metrics_reporter: self.metrics_reporter.clone(),
         }
     }
 }
@@ -91,6 +91,7 @@ where
         discovery: Arc<Mutex<D>>,
         rpc_server: S,
         rpc_client: C,
+        metrics_reporter: metrics::ThreadSafeReporter,
         settings: settings::Settings,
     ) -> Result<Self, Error> {
         if settings.server_kind.trim().is_empty() {
@@ -108,7 +109,7 @@ where
             rpc_server,
             logger,
             settings: Arc::new(settings),
-            metrics_server: Arc::new(Mutex::new(None)),
+            metrics_reporter,
         })
     }
 
@@ -251,31 +252,12 @@ where
         // NOTE(lhahn): I don't expect that we'll attemp to send more than 20 die messages.
         let (app_die_sender, app_die_receiver) = broadcast::channel(20);
 
-        // Start the metrics server first if it is enabled.
-        if self.settings.metrics.enabled {
-            let addr = self
-                .settings
-                .metrics
-                .url
-                .parse()
-                .map_err(|_e| Error::InvalidAddress {
-                    module: "metrics server".to_string(),
-                    address: self.settings.metrics.url.to_string(),
-                })?;
-
-            let ms = metrics::start_server(
-                self.logger.clone(),
-                self.settings.metrics.namespace.clone(),
-                addr,
-                app_die_receiver,
-            );
-            self.metrics_server.lock().await.replace(tokio::spawn(ms));
-        }
+        self.metrics_reporter.write().await.start().await.unwrap();
 
         let graceful_shutdown = tokio::spawn(Self::graceful_shutdown_task(
             self.logger.new(o!("task" => "graceful_shutdown")),
             graceful_shutdown_sender,
-            app_die_sender.subscribe(),
+            app_die_receiver,
         ));
 
         self.rpc_client.start().await?;
@@ -316,30 +298,22 @@ where
         tokio::select! {
             _ = signal_hangup.recv() => {
                 warn!(logger, "received hangup signal");
-                if let Err(_) = graceful_shutdown_sender.send(()) {
-                    error!(logger, "failed to send graceful shutdown message, receiver already dropped");
-                }
+                let _ = graceful_shutdown_sender.send(());
                 return;
             }
             _ = signal_interrupt.recv() => {
                 warn!(logger, "received interrupt signal");
-                if let Err(_) = graceful_shutdown_sender.send(()) {
-                    error!(logger, "failed to send graceful shutdown message, receiver already dropped");
-                }
+                let _ = graceful_shutdown_sender.send(());
                 return;
             }
             _ = signal_terminate.recv() => {
                 warn!(logger, "received terminate signal");
-                if let Err(_) = graceful_shutdown_sender.send(()) {
-                    error!(logger, "failed to send graceful shutdown message, receiver already dropped");
-                }
+                let _ = graceful_shutdown_sender.send(());
                 return;
             }
             _ = app_die_receiver.recv() => {
                 warn!(logger, "received app die message");
-                if let Err(_) = graceful_shutdown_sender.send(()) {
-                    error!(logger, "failed to send graceful shutdown message, receiver already dropped");
-                }
+                let _ = graceful_shutdown_sender.send(());
                 return;
             }
         }
@@ -502,6 +476,28 @@ where
             frontend: self.frontend,
         });
 
+        let metrics_reporter: metrics::ThreadSafeReporter = if settings.metrics.enabled {
+            let metrics_addr =
+                settings
+                    .metrics
+                    .url
+                    .parse()
+                    .map_err(|_e| Error::InvalidAddress {
+                        module: "metrics".to_string(),
+                        address: settings.metrics.url.clone(),
+                    })?;
+            Arc::new(RwLock::new(Box::new(
+                prometheus_metrics::PrometheusReporter::new(
+                    settings.metrics.namespace.clone(),
+                    settings.metrics.const_labels.clone(),
+                    logger.clone(),
+                    metrics_addr,
+                )?,
+            )))
+        } else {
+            Arc::new(RwLock::new(Box::new(metrics::DummyReporter {})))
+        };
+
         let discovery = Arc::new(Mutex::new(
             etcd_nats_cluster::EtcdLazy::new(logger.clone(), server_info.clone(), etcd_settings)
                 .await?,
@@ -511,6 +507,7 @@ where
             server_info.clone(),
             nats_settings.clone(),
             tokio::runtime::Handle::current(),
+            metrics_reporter.clone(),
         );
         let rpc_client = NatsRpcClient::new(logger.clone(), nats_settings);
 
@@ -520,6 +517,7 @@ where
             discovery,
             rpc_server,
             rpc_client,
+            metrics_reporter,
             settings,
         )
         .await?;

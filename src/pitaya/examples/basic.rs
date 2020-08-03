@@ -1,9 +1,3 @@
-extern crate pitaya;
-extern crate slog;
-extern crate slog_async;
-extern crate slog_term;
-extern crate tokio;
-
 use pitaya::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 use slog::{error, info, o, Drain};
 use tokio::sync::watch;
@@ -78,13 +72,13 @@ async fn main() {
 
     // let statsd_client = Arc::new(new_statsd_client());
 
-    let (mut pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
+    let (pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
         .with_env_prefix("MY_ENV")
         .with_config_file("examples/config/production.yaml")
         .with_logger(root_logger)
         .with_rpc_handler({
             let logger = logger.clone();
-            move |ctx, mut rpc| {
+            move |_ctx, rpc| {
                 info!(logger, "!!!!!!!! received rpc req: {:?}", rpc.request());
                 let res = pitaya::protos::Response {
                     data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),

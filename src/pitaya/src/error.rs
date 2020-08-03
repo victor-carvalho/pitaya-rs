@@ -1,4 +1,4 @@
-use crate::{cluster, ServerKind};
+use crate::{cluster, metrics, ServerKind};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -53,4 +53,7 @@ pub enum Error {
 
     #[error("cluster: {0}")]
     Cluster(#[from] cluster::Error),
+
+    #[error("metrics: {0}")]
+    Metrics(#[from] metrics::Error),
 }

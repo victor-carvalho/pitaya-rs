@@ -6,6 +6,6 @@ server_kind = "SuperKind"
 request_timeout = "3s"
 
 [metrics]
-namespace = "pitaya-rs"
+namespace = "my_game"
 enabled = true
 url = "127.0.0.1:8000"

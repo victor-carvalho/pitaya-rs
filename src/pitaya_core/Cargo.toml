@@ -11,8 +11,6 @@ tokio = { version = "0.2", features = ["full"] }
 async-trait = "0.1"
 prost = "0.6.1"
 slog = { version = "2.5", features = ["max_level_trace"] }
-prometheus = "0.9"
-hyper = "0.13"
 lazy_static = "1.4.0"
 thiserror = "1.0"
 rand = "0.7.3"

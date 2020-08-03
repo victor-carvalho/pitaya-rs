@@ -1,9 +1,10 @@
 use crate::constants;
 use config::{Config, ConfigError, Environment, File};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
 pub struct Metrics {
     // The namespace that will be used when reporting metrics. Default "pitaya".
     pub namespace: String,
@@ -13,6 +14,9 @@ pub struct Metrics {
 
     // The path the metrics server will respond to.
     pub path: String,
+
+    // Const labels for this specific server.
+    pub const_labels: HashMap<String, String>,
 
     // If the metrics are enabled or not (default is false).
     pub enabled: bool,
@@ -24,6 +28,7 @@ impl Default for Metrics {
             namespace: constants::DEFAULT_METRICS_NAMESPACE.to_owned(),
             url: constants::DEFAULT_METRICS_URL.to_owned(),
             path: constants::DEFAULT_METRICS_PATH.to_owned(),
+            const_labels: HashMap::new(),
             enabled: false,
         }
     }
