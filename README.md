@@ -23,6 +23,24 @@ cargo test
 makers undeps
 ```
 
+# Examples
+There are rust examples that can be run with the traditional cargo commands:
+```
+cargo run --example <example-name>
+```
+
+There are also one example in C that can be found in the `examples/c` directory. You can run that on MacOS using the following commands:
+```
+cd examples/c
+./build.sh && ./example
+```
+
+The C# example is found in the `pitaya-sharp/exampleapp` directory and can be run with the following commands:
+```
+cd pitaya-sharp
+dotnet run -p exampleapp
+```
+
 # Benchmarks
 The default command for benchmarks is the following:
 ```
