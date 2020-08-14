@@ -5,9 +5,12 @@ pub mod settings;
 
 pub use error::Error;
 pub use etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
-use pitaya_core::cluster::server::{ServerId, ServerInfo, ServerKind};
-use pitaya_core::context;
-pub use pitaya_core::{cluster, metrics, protos, utils};
+pub use pitaya_core::{cluster, context::Context, message, metrics, protos, utils};
+use pitaya_core::{
+    cluster::server::{ServerId, ServerInfo, ServerKind},
+    constants as core_constants,
+};
+use pitaya_core::{context, Route};
 use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc};
@@ -15,30 +18,6 @@ use tokio::{
     sync::{broadcast, mpsc, oneshot, Mutex, RwLock},
     task,
 };
-
-#[derive(Debug)]
-struct Route<'a> {
-    pub server_kind: &'a str,
-    pub handler: &'a str,
-    pub method: &'a str,
-}
-
-impl<'a> std::convert::TryFrom<&'a str> for Route<'a> {
-    type Error = error::Error;
-
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        let comps: Vec<&'a str> = value.split(".").collect();
-        if comps.len() == 3 {
-            Ok(Route {
-                server_kind: comps[0],
-                handler: comps[1],
-                method: comps[2],
-            })
-        } else {
-            Err(Error::InvalidRoute)
-        }
-    }
-}
 
 struct Tasks {
     listen_for_rpc: task::JoinHandle<()>,
@@ -154,13 +133,15 @@ where
 
     pub async fn send_rpc_to_server(
         &mut self,
+        ctx: context::Context,
         server_id: &ServerId,
         server_kind: &ServerKind,
-        req: protos::Request,
+        route_str: &str,
+        data: Vec<u8>,
     ) -> Result<protos::Response, Error> {
         debug!(self.logger, "sending rpc");
 
-        let server = {
+        let server_info = {
             debug!(self.logger, "getting servers");
             self.discovery
                 .lock()
@@ -169,12 +150,26 @@ where
                 .await?
         };
 
-        if let Some(server) = server {
+        if let Some(server_info) = server_info {
+            let msg = message::Message {
+                kind: message::Kind::Request,
+                // TODO(lhahn): what is the id here?
+                id: 1,
+                route: route_str.to_string(),
+                data,
+                compressed: false,
+                err: false,
+            };
+
             debug!(self.logger, "sending rpc");
-            let res = self.rpc_client.call(server, req).await.map(|res| {
-                trace!(self.logger, "received rpc response"; "res" => ?res);
-                res
-            })?;
+            let res = self
+                .rpc_client
+                .call(ctx, protos::RpcType::User, msg, server_info)
+                .await
+                .map(|res| {
+                    trace!(self.logger, "received rpc response"; "res" => ?res);
+                    res
+                })?;
             Ok(res)
         } else {
             Err(Error::NoServersFound(server_kind.clone()))
@@ -183,13 +178,14 @@ where
 
     pub async fn send_rpc(
         &mut self,
-        route: &str,
-        req: protos::Request,
+        ctx: context::Context,
+        route_str: &str,
+        data: Vec<u8>,
     ) -> Result<protos::Response, Error> {
         debug!(self.logger, "sending rpc");
 
-        let route = Route::try_from(route)?;
-        let server_kind = ServerKind::from(route.server_kind);
+        let route = Route::from_str(route_str.to_string()).ok_or(Error::InvalidRoute)?;
+        let server_kind = ServerKind::from(route.server_kind());
 
         debug!(self.logger, "getting servers");
         let servers = self
@@ -200,12 +196,24 @@ where
             .await?;
 
         debug!(self.logger, "getting random server");
-        if let Some(random_server) = utils::random_server(&servers) {
+        if let Some(random_server_info) = utils::random_server(&servers) {
             debug!(self.logger, "sending rpc");
-            let res = self.rpc_client.call(random_server, req).await.map(|res| {
-                trace!(self.logger, "received rpc response"; "res" => ?res);
-                res
-            })?;
+
+            let msg = message::Message {
+                kind: message::Kind::Request,
+                route: route_str.to_string(),
+                data,
+                ..Default::default()
+            };
+
+            let res = self
+                .rpc_client
+                .call(ctx, protos::RpcType::User, msg, random_server_info)
+                .await
+                .map(|res| {
+                    trace!(self.logger, "received rpc response"; "res" => ?res);
+                    res
+                })?;
             Ok(res)
         } else {
             error!(self.logger, "found no servers for kind"; "kind" => &server_kind.0);
@@ -335,7 +343,7 @@ where
                     Err(e) => {
                         let response = protos::Response {
                             error: Some(protos::Error {
-                                code: constants::CODE_BAD_FORMAT.to_string(),
+                                code: core_constants::CODE_BAD_FORMAT.to_string(),
                                 msg: format!("invalid request: {}", e),
                                 ..Default::default()
                             }),
@@ -509,7 +517,7 @@ where
             tokio::runtime::Handle::current(),
             metrics_reporter.clone(),
         );
-        let rpc_client = NatsRpcClient::new(logger.clone(), nats_settings);
+        let rpc_client = NatsRpcClient::new(logger.clone(), nats_settings, server_info.clone());
 
         let mut p = Pitaya::new(
             server_info,

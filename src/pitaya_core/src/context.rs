@@ -1,4 +1,5 @@
 use crate::protos;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
@@ -7,6 +8,26 @@ use std::convert::TryFrom;
 #[derive(Debug)]
 pub struct Context {
     map: HashMap<String, serde_json::Value>,
+}
+
+impl Context {
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    // Adds a new key value pair into the context.
+    // Returns true if the key collided with an existing key. Note that the newer key
+    // will always replace the older one.
+    pub fn add<T: ToString, S: Serialize>(
+        &mut self,
+        key: T,
+        val: S,
+    ) -> Result<bool, serde_json::Error> {
+        let json_val = serde_json::to_value(val)?;
+        Ok(self.map.insert(key.to_string(), json_val).is_some())
+    }
 }
 
 impl TryFrom<&protos::Request> for Context {

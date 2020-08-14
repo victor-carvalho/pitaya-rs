@@ -1,4 +1,7 @@
-use crate::cluster::{ServerInfo, ServerKind};
+use crate::{
+    cluster::{ServerInfo, ServerKind},
+    constants, context, message, protos, Error,
+};
 use rand::Rng;
 use std::sync::Arc;
 
@@ -37,4 +40,53 @@ where
     // therefore we can safely ignore it
     msg.encode(&mut b).expect("failed to encode proto message");
     b
+}
+
+pub fn build_request(
+    mut ctx: context::Context,
+    rpc_type: protos::RpcType,
+    msg: message::Message,
+    // consider adding a session here in the future.
+    server_info: Arc<ServerInfo>,
+) -> Result<protos::Request, Error> {
+    if ctx
+        .add(constants::PEER_ID_KEY, &server_info.id.0)
+        .expect("should not fail")
+    {
+        return Err(Error::ContextKeyCollistion(
+            constants::PEER_ID_KEY.to_string(),
+        ));
+    }
+
+    if ctx
+        .add(constants::PEER_SERVICE_KEY, &server_info.kind.0)
+        .expect("should not fail")
+    {
+        return Err(Error::ContextKeyCollistion(
+            constants::PEER_SERVICE_KEY.to_string(),
+        ));
+    }
+
+    let req = protos::Request {
+        r#type: rpc_type as i32,
+        msg: Some(protos::Msg {
+            r#type: if msg.kind == message::Kind::Request {
+                protos::MsgType::MsgRequest as i32
+            } else {
+                protos::MsgType::MsgNotify as i32
+            },
+            data: msg.data,
+            route: msg.route,
+            ..protos::Msg::default()
+        }),
+        frontend_id: if server_info.frontend {
+            server_info.id.0.clone()
+        } else {
+            String::new()
+        },
+        metadata: ctx.into(),
+        ..protos::Request::default()
+    };
+
+    Ok(req)
 }

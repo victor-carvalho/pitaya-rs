@@ -1,4 +1,4 @@
-use pitaya::{EtcdLazy, NatsRpcClient, NatsRpcServer};
+use pitaya::{Context, EtcdLazy, NatsRpcClient, NatsRpcServer};
 use slog::{error, info, o, Drain};
 use tokio::sync::watch;
 
@@ -17,21 +17,10 @@ async fn send_rpc(
 
         if let Err(e) = pitaya_server
             .send_rpc(
+                Context::new(),
                 // "csharp.testRemote.remote",
                 "SuperKind.testRemote.remote",
-                pitaya::protos::Request {
-                    r#type: pitaya::protos::RpcType::User as i32,
-                    msg: Some(pitaya::protos::Msg {
-                        r#type: pitaya::protos::MsgType::MsgRequest as i32,
-                        data: msg,
-                        // route: "csharp.testRemote.remote".to_owned(),
-                        route: "SuperKind.testRemote.remote".to_owned(),
-                        ..pitaya::protos::Msg::default()
-                    }),
-                    frontend_id: "".to_owned(),
-                    metadata: "{}".as_bytes().to_owned(),
-                    ..pitaya::protos::Request::default()
-                },
+                msg,
             )
             .await
         {

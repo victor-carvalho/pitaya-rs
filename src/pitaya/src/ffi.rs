@@ -1,10 +1,10 @@
 use crate::{cluster, context, protos, utils, PitayaBuilder, ServerId, ServerKind};
 use etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
+use pitaya_core::Route;
 use prost::Message;
 use slog::{error, o, Drain};
 use std::{
     borrow::Cow,
-    convert::TryFrom,
     ffi::{c_void, CStr, CString},
     mem,
     os::raw::c_char,
@@ -550,27 +550,17 @@ pub extern "C" fn pitaya_send_rpc(
     let route_str = unsafe { CStr::from_ptr(route_str).to_string_lossy() };
     let request_buffer = unsafe { Box::from_raw(request_buffer) };
 
-    let request = protos::Request {
-        r#type: protos::RpcType::User as i32,
-        msg: Some(protos::Msg {
-            r#type: protos::MsgType::MsgRequest as i32,
-            data: request_buffer.data.clone(),
-            route: route_str.as_ref().to_owned(),
-            ..protos::Msg::default()
-        }),
-        // TODO(lhahn): send metadata here or add something relevant (Jaeger?).
-        metadata: "{}".as_bytes().to_owned(),
-        ..protos::Request::default()
-    };
-
     let route_str = route_str.to_string();
     let mut pitaya_server = p.pitaya_server.clone();
     p.runtime.spawn(async move {
-        let route = match crate::Route::try_from(route_str.as_ref()) {
-            Ok(r) => r,
-            Err(e) => {
-                error!(logger, "failed to convert route"; "error" => %e);
-                let mut err = Box::new(PitayaError::new("PIT-500", &format!("rpc error: {}", e)));
+        let route = match Route::from_str(route_str.to_string()) {
+            Some(r) => r,
+            None => {
+                error!(logger, "failed to convert route"; "route" => %route_str);
+                let mut err = Box::new(PitayaError::new(
+                    "PIT-500",
+                    &format!("rpc error: invalid route {}", route_str),
+                ));
                 callback(user_data.0, &mut *err as *mut PitayaError, null_mut());
                 return;
             }
@@ -579,13 +569,21 @@ pub extern "C" fn pitaya_send_rpc(
         let result = if server_id.len() > 0 {
             pitaya_server
                 .send_rpc_to_server(
+                    context::Context::new(),
                     &ServerId::from(server_id.as_ref()),
-                    &ServerKind::from(route.server_kind),
-                    request,
+                    &ServerKind::from(route.server_kind()),
+                    &route_str,
+                    request_buffer.data.clone(),
                 )
                 .await
         } else {
-            pitaya_server.send_rpc(route_str.as_ref(), request).await
+            pitaya_server
+                .send_rpc(
+                    context::Context::new(),
+                    route_str.as_ref(),
+                    request_buffer.data.clone(),
+                )
+                .await
         };
 
         let res = match result {

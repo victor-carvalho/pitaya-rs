@@ -2,7 +2,7 @@ use crate::settings;
 use async_trait::async_trait;
 use pitaya_core::{
     cluster::{Error, RpcClient, ServerId, ServerInfo, ServerKind},
-    protos, utils,
+    context, message, protos, utils,
 };
 use prost::Message;
 use slog::{error, info, trace};
@@ -13,14 +13,20 @@ pub struct NatsRpcClient {
     settings: Arc<settings::Nats>,
     connection: Option<nats::Connection>,
     logger: slog::Logger,
+    server_info: Arc<ServerInfo>,
 }
 
 impl NatsRpcClient {
-    pub fn new(logger: slog::Logger, settings: Arc<settings::Nats>) -> Self {
+    pub fn new(
+        logger: slog::Logger,
+        settings: Arc<settings::Nats>,
+        server_info: Arc<ServerInfo>,
+    ) -> Self {
         Self {
             settings,
             connection: None,
             logger,
+            server_info,
         }
     }
 }
@@ -47,8 +53,10 @@ impl RpcClient for NatsRpcClient {
 
     async fn call(
         &self,
+        ctx: context::Context,
+        rpc_type: protos::RpcType,
+        msg: message::Message,
         target: Arc<ServerInfo>,
-        req: protos::Request,
     ) -> Result<protos::Response, Error> {
         trace!(self.logger, "NatsRpcClient::call");
         let connection = self
@@ -56,6 +64,9 @@ impl RpcClient for NatsRpcClient {
             .as_ref()
             .map(|conn| conn.clone())
             .ok_or(Error::NatsConnectionNotOpen)?;
+
+        let req = utils::build_request(ctx, rpc_type, msg, self.server_info.clone())
+            .map_err(|e| Error::Internal(e.to_string()))?;
         let topic = utils::topic_for_server(&target);
         let buffer = utils::encode_proto(&req);
 
@@ -189,6 +200,16 @@ mod tests {
     use std::error::Error as StdError;
     use std::time::Duration;
 
+    fn new_server() -> Arc<ServerInfo> {
+        Arc::new(ServerInfo {
+            frontend: true,
+            hostname: "".to_owned(),
+            id: ServerId::new(),
+            kind: ServerKind::new(),
+            metadata: HashMap::new(),
+        })
+    }
+
     #[test]
     fn nats_rpc_client_can_be_created() {
         let _client = NatsRpcClient::new(
@@ -197,6 +218,7 @@ mod tests {
                 url: "https://sfdjsdoifj".to_owned(),
                 ..Default::default()
             }),
+            new_server(),
         );
     }
 
@@ -209,6 +231,7 @@ mod tests {
                 url: "https://nats-io.server:3241".to_owned(),
                 ..Default::default()
             }),
+            new_server(),
         );
         client.start().await.unwrap();
         client.shutdown().await.unwrap();
@@ -222,6 +245,7 @@ mod tests {
                 request_timeout: Duration::from_millis(300),
                 ..Default::default()
             }),
+            new_server(),
         );
         client.start().await?;
 
@@ -235,19 +259,17 @@ mod tests {
 
         let response = client
             .call(
-                target_server,
-                protos::Request {
-                    r#type: protos::RpcType::User as i32,
-                    msg: Some(protos::Msg {
-                        r#type: protos::MsgType::MsgRequest as i32,
-                        data: vec![],
-                        route: "".to_owned(),
-                        ..protos::Msg::default()
-                    }),
-                    frontend_id: "".to_owned(),
-                    metadata: Vec::new(),
-                    ..protos::Request::default()
+                context::Context::new(),
+                protos::RpcType::User,
+                message::Message {
+                    kind: message::Kind::Request,
+                    id: 20,
+                    data: vec![],
+                    compressed: false,
+                    err: false,
+                    route: "room.room.join".to_string(),
                 },
+                target_server,
             )
             .await;
 
@@ -267,14 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn nats_request_works() -> Result<(), Box<dyn StdError>> {
-        async fn start_service_disovery() -> Result<EtcdLazy, Error> {
-            let sv = Arc::new(ServerInfo {
-                id: ServerId::from("1234567"),
-                kind: ServerKind::from("room"),
-                frontend: false,
-                hostname: "owiejfoiwejf".to_owned(),
-                metadata: HashMap::new(),
-            });
+        async fn start_service_disovery(sv: Arc<ServerInfo>) -> Result<EtcdLazy, Error> {
             EtcdLazy::new(
                 test_helpers::get_root_logger(),
                 sv,
@@ -287,7 +302,15 @@ mod tests {
             .await
         }
 
-        let mut service_discovery = start_service_disovery().await?;
+        let sv = Arc::new(ServerInfo {
+            id: ServerId::from("1234567"),
+            kind: ServerKind::from("room"),
+            frontend: false,
+            hostname: "owiejfoiwejf".to_owned(),
+            metadata: HashMap::new(),
+        });
+
+        let mut service_discovery = start_service_disovery(sv.clone()).await?;
 
         let mut client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
@@ -295,6 +318,7 @@ mod tests {
                 request_timeout: Duration::from_millis(300),
                 ..Default::default()
             }),
+            sv,
         );
         client.start().await?;
 
@@ -312,19 +336,17 @@ mod tests {
 
         let response = client
             .call(
-                servers_by_kind[0].clone(),
-                protos::Request {
-                    r#type: protos::RpcType::User as i32,
-                    msg: Some(protos::Msg {
-                        r#type: protos::MsgType::MsgRequest as i32,
-                        data: rpc_data.as_bytes().to_owned(),
-                        route: "room.join".to_owned(),
-                        ..protos::Msg::default()
-                    }),
-                    frontend_id: "".to_owned(),
-                    metadata: "{}".as_bytes().to_owned(),
-                    ..protos::Request::default()
+                context::Context::new(),
+                protos::RpcType::User,
+                message::Message {
+                    kind: message::Kind::Request,
+                    id: 20,
+                    data: rpc_data.as_bytes().to_owned(),
+                    compressed: false,
+                    err: false,
+                    route: "room.room.join".to_string(),
                 },
+                servers_by_kind[0].clone(),
             )
             .await?;
 

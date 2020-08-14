@@ -241,7 +241,10 @@ impl RpcServer for NatsRpcServer {
 mod tests {
     use super::*;
     use crate::NatsRpcClient;
-    use pitaya_core::cluster::{RpcClient, ServerId, ServerKind};
+    use pitaya_core::{
+        cluster::{RpcClient, ServerId, ServerKind},
+        context, message,
+    };
     use std::collections::HashMap;
     use std::error::Error as StdError;
 
@@ -286,24 +289,23 @@ mod tests {
             let mut client = NatsRpcClient::new(
                 test_helpers::get_root_logger(),
                 Arc::new(Default::default()),
+                sv.clone(),
             );
             client.start().await?;
 
             let res = client
                 .call(
-                    sv.clone(),
-                    protos::Request {
-                        r#type: protos::RpcType::User as i32,
-                        msg: Some(protos::Msg {
-                            r#type: protos::MsgType::MsgRequest as i32,
-                            data: "sending some data".as_bytes().to_owned(),
-                            route: "room.room.join".to_owned(),
-                            ..protos::Msg::default()
-                        }),
-                        frontend_id: "".to_owned(),
-                        metadata: "{}".as_bytes().to_owned(),
-                        ..protos::Request::default()
+                    context::Context::new(),
+                    protos::RpcType::User,
+                    message::Message {
+                        kind: message::Kind::Request,
+                        id: 12,
+                        data: "sending some data".as_bytes().to_owned(),
+                        route: "room.room.join".to_owned(),
+                        compressed: false,
+                        err: false,
                     },
+                    sv.clone(),
                 )
                 .await?;
 

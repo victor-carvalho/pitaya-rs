@@ -1,4 +1,4 @@
-use crate::protos;
+use crate::{context, message, protos};
 use async_trait::async_trait;
 use std::sync::Arc;
 use thiserror::Error;
@@ -85,11 +85,15 @@ pub trait RpcServer {
 // Client represents an RPC client for the other servers in the cluster.
 #[async_trait]
 pub trait RpcClient {
+    // func (a *Remote) SendRequest(ctx context.Context, serverID, reqRoute string, v interface{}) (*protos.Response, error) {
+
     // This function sends an RPC to a given server in the cluster.
     async fn call(
         &self,
-        target: Arc<ServerInfo>,
-        req: protos::Request,
+        ctx: context::Context,
+        rpc_type: protos::RpcType,
+        msg: message::Message,
+        server_info: Arc<ServerInfo>,
     ) -> Result<protos::Response, Error>;
 
     // Kicks a user connected to a specific frontend server.

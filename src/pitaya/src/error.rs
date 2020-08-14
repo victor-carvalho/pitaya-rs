@@ -56,4 +56,7 @@ pub enum Error {
 
     #[error("metrics: {0}")]
     Metrics(#[from] metrics::Error),
+
+    #[error("core: {0}")]
+    Core(#[from] pitaya_core::Error),
 }
