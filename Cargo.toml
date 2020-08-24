@@ -4,6 +4,7 @@ members = [
     "src/pitaya_core",
     "src/etcd_nats_cluster",
     "src/test_helpers",
+    "src/pitaya_macros",
 ]
 
 [profile.release]

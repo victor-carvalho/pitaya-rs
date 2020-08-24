@@ -8,6 +8,7 @@ edition = "2018"
 name = "pitaya"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
+proc-macro = true
 
 [[bench]]
 name = "self_rpc_call"
@@ -19,6 +20,7 @@ harness = false
 
 [dependencies]
 pitaya_core = { path = "../pitaya_core" }
+pitaya_macros = { path = "../pitaya_macros" }
 etcd_nats_cluster = { path = "../etcd_nats_cluster" }
 prometheus_metrics = { path = "../prometheus_metrics" }
 test_helpers = { path = "../test_helpers" }

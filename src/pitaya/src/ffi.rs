@@ -434,7 +434,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
             .with_env_prefix(&env_prefix.to_string_lossy())
             .with_config_file(&config_file.to_string_lossy())
             .with_logger(root_logger)
-            .with_rpc_handler(move |ctx, rpc| {
+            .with_rpc_handler(Box::new(move |ctx, rpc| {
                 let request_buffer = utils::encode_proto(rpc.request());
                 let rpc = Box::into_raw(Box::new(PitayaRpc {
                     request: request_buffer,
@@ -442,7 +442,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
                 }));
                 let pitaya_ctx = Box::into_raw(Box::new(PitayaContext::from(ctx)));
                 handle_rpc_cb(user_ctx.0, pitaya_ctx, rpc);
-            })
+            }))
             .with_cluster_subscriber({
                 move |notification| match notification {
                     cluster::Notification::ServerAdded(server) => {

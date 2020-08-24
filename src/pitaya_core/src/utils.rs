@@ -42,6 +42,21 @@ where
     b
 }
 
+pub fn build_error_response<S, T>(code: S, msg: T) -> protos::Response
+where
+    S: ToString,
+    T: ToString,
+{
+    protos::Response {
+        error: Some(protos::Error {
+            code: code.to_string(),
+            msg: msg.to_string(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 pub fn build_request(
     mut ctx: context::Context,
     rpc_type: protos::RpcType,

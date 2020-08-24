@@ -1,6 +1,7 @@
 pub mod cluster;
 pub mod constants;
 pub mod context;
+pub mod handler;
 pub mod message;
 pub mod metrics;
 pub mod utils;
@@ -65,5 +66,76 @@ impl Route {
         }
 
         Some(Route { route_string })
+    }
+}
+
+pub enum Never {}
+
+pub trait ToError {
+    fn to_error(self) -> protos::Error;
+}
+
+pub trait ToResponseProto {
+    fn to_response_proto(self) -> protos::Response;
+}
+
+pub trait ToResponseJson {
+    fn to_response_json(self) -> protos::Response;
+}
+
+impl<T: serde::Serialize, E: ToError> ToResponseJson for Result<T, E> {
+    fn to_response_json(self) -> protos::Response {
+        match self {
+            Ok(v) => {
+                let res_bytes = serde_json::to_vec(&v).expect("should not fail");
+                protos::Response {
+                    data: res_bytes,
+                    error: None,
+                }
+            }
+            Err(e) => protos::Response {
+                data: vec![],
+                error: Some(e.to_error()),
+            },
+        }
+    }
+}
+
+impl<T: prost::Message, E: ToError> ToResponseProto for Result<T, E> {
+    fn to_response_proto(self) -> protos::Response {
+        match self {
+            Ok(v) => {
+                let res_bytes = utils::encode_proto(&v);
+                protos::Response {
+                    data: res_bytes,
+                    error: None,
+                }
+            }
+            Err(e) => protos::Response {
+                data: vec![],
+                error: Some(e.to_error()),
+            },
+        }
+    }
+}
+
+impl ToError for Never {
+    fn to_error(self) -> protos::Error {
+        protos::Error::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn route_works() {
+        let route_str = "server-kind.myhandler.mymethod";
+        let route = Route::from_str(route_str.to_owned()).expect("should not fail");
+        assert_eq!(route.as_str(), route_str);
+        assert_eq!(route.server_kind(), "server-kind");
+        assert_eq!(route.handler(), "myhandler");
+        assert_eq!(route.method(), "mymethod");
     }
 }
