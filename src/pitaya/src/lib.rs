@@ -11,7 +11,7 @@ use pitaya_core::{
     constants as core_constants,
 };
 use pitaya_core::{context, Route};
-pub use pitaya_macros::{handlers, json_handler};
+pub use pitaya_macros::{handlers, json_handler, proto_handler};
 use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc};

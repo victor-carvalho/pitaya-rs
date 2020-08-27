@@ -15,16 +15,16 @@ async fn send_rpc(
 
         let msg = msg.clone();
 
-        if let Err(e) = pitaya_server
-            .send_rpc(
-                Context::new(),
-                // "csharp.testRemote.remote",
-                "SuperKind.testRemote.remote",
-                msg,
-            )
+        match pitaya_server
+            .send_rpc(Context::new(), "SuperKind.random.test_method", msg)
             .await
         {
-            println!("RPC FAILED: {}", e);
+            Ok(res) => {
+                println!("RPC SUCCEEDED: {}", String::from_utf8_lossy(&res.data));
+            }
+            Err(e) => {
+                println!("RPC FAILED: {}", e);
+            }
         }
     }
 }
@@ -48,27 +48,26 @@ pub struct RpcMsg {
     pub msg: std::string::String,
 }
 
+#[pitaya::proto_handler("random")]
+async fn test_method() -> Result<RpcMsg, pitaya::Never> {
+    Ok(RpcMsg {
+        route: String::from(""),
+        msg: String::from("Hello from Probobuf!"),
+    })
+}
+
 #[tokio::main]
 async fn main() {
     let root_logger = init_logger();
     let logger = root_logger.clone();
 
+    let handlers = pitaya::handlers![test_method];
+
     let (pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
         .with_env_prefix("MY_ENV")
         .with_config_file("examples/config/production.yaml")
         .with_logger(root_logger)
-        .with_rpc_handler({
-            let logger = logger.clone();
-            Box::new(move |_ctx, rpc| {
-                let res = pitaya::protos::Response {
-                    data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
-                    error: None,
-                };
-                if !rpc.respond(res) {
-                    error!(logger, "failed to respond to the server");
-                }
-            })
-        })
+        .with_handlers(handlers)
         .with_cluster_subscriber({
             let logger = logger.clone();
             move |notification| match notification {

@@ -63,7 +63,21 @@ pub fn handlers(item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
+pub fn proto_handler(attrs: TokenStream, item: TokenStream) -> TokenStream {
+    common_handler(HandlerKind::Protobuf, attrs, item)
+}
+
+#[proc_macro_attribute]
 pub fn json_handler(attrs: TokenStream, item: TokenStream) -> TokenStream {
+    common_handler(HandlerKind::Json, attrs, item)
+}
+
+enum HandlerKind {
+    Json,
+    Protobuf,
+}
+
+fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as ItemFn);
 
     let attrs = proc_macro2::TokenStream::from(attrs);
@@ -112,13 +126,25 @@ pub fn json_handler(attrs: TokenStream, item: TokenStream) -> TokenStream {
         return quote! { compile_error!("json handlers must return Result<T, E>"); }.into();
     }
 
-    let body = quote! {
-        use ::pitaya_core::ToResponseJson;
-        let fut = async {
-            let res = #func_call.await;
-            res.to_response_json()
-        };
-        ::std::boxed::Box::pin(fut)
+    let body = match handler_kind {
+        HandlerKind::Json => quote! {
+            use ::pitaya_core::ToResponseJson;
+
+            let fut = async {
+                let res = #func_call.await;
+                res.to_response_json()
+            };
+            ::std::boxed::Box::pin(fut)
+        },
+        HandlerKind::Protobuf => quote! {
+            use ::pitaya_core::ToResponseProto;
+
+            let fut = async {
+                let res = #func_call.await;
+                res.to_response_proto()
+            };
+            ::std::boxed::Box::pin(fut)
+        },
     };
 
     let output = quote! {
