@@ -259,7 +259,7 @@ mod tests {
 
         let response = client
             .call(
-                context::Context::new(),
+                context::Context::empty(),
                 protos::RpcType::User,
                 message::Message {
                     kind: message::Kind::Request,
@@ -278,7 +278,7 @@ mod tests {
 
         match err {
             Error::Nats(nats_err) => {
-                assert!(nats_err.kind() == std::io::ErrorKind::TimedOut);
+                assert_eq!(nats_err.kind(), std::io::ErrorKind::TimedOut);
             }
             _ => panic!("unexpected error"),
         };
@@ -336,7 +336,7 @@ mod tests {
 
         let response = client
             .call(
-                context::Context::new(),
+                context::Context::empty(),
                 protos::RpcType::User,
                 message::Message {
                     kind: message::Kind::Request,

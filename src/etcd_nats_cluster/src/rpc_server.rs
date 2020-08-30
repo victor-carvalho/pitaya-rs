@@ -295,7 +295,7 @@ mod tests {
 
             let res = client
                 .call(
-                    context::Context::new(),
+                    context::Context::empty(),
                     protos::RpcType::User,
                     message::Message {
                         kind: message::Kind::Request,

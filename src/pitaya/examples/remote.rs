@@ -1,7 +1,11 @@
 #![feature(future_readiness_fns)]
-use pitaya::{Context, EtcdLazy, NatsRpcClient, NatsRpcServer};
+use pitaya::{Context, EtcdLazy, NatsRpcClient, NatsRpcServer, State};
 use slog::{error, info, o, Drain};
-use tokio::sync::watch;
+use std::sync::{Arc, Mutex};
+use tokio::{
+    sync::watch,
+    time::{Duration, Instant},
+};
 
 async fn send_rpc(
     mut pitaya_server: pitaya::Pitaya<EtcdLazy, NatsRpcServer, NatsRpcClient>,
@@ -17,16 +21,22 @@ async fn send_rpc(
         let msg = msg.clone();
 
         match pitaya_server
-            .send_rpc(Context::new(), "SuperKind.hello.hello_method", msg)
+            .send_rpc(Context::empty(), "SuperKind.hello.hello_method", msg)
             .await
         {
             Ok(res) => {
-                println!("RPC SUCCEEDED: {}", String::from_utf8_lossy(&res.data));
+                if let Some(err) = res.error {
+                    println!("RPC RETURNED ERROR: code={}, msg={}", err.code, err.msg);
+                } else {
+                    println!("RPC SUCCEEDED: {}", String::from_utf8_lossy(&res.data));
+                }
             }
             Err(e) => {
                 println!("RPC FAILED: {}", e);
             }
         }
+
+        tokio::time::delay_until(Instant::now() + Duration::from_secs(1)).await;
     }
 }
 
@@ -54,10 +64,16 @@ struct MyResponse {
     pub my_message: String,
 }
 
+struct Counter {
+    value: Arc<Mutex<i32>>,
+}
+
 #[pitaya::json_handler("hello")]
-async fn hello_method() -> Result<MyResponse, pitaya::Never> {
+async fn hello_method(counter: State<'_, Counter>) -> Result<MyResponse, pitaya::Never> {
+    let mut count = counter.value.lock().unwrap();
+    *count = *count + 1;
     Ok(MyResponse {
-        my_message: String::from("my awesome response"),
+        my_message: format!("my awesome response: count={}", count),
     })
 }
 
@@ -66,13 +82,14 @@ async fn main() {
     let root_logger = init_logger();
     let logger = root_logger.clone();
 
-    let mut handlers = pitaya::handlers![hello_method];
-
     let (pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
         .with_env_prefix("MY_ENV")
         .with_config_file("examples/config/production.yaml")
         .with_logger(root_logger)
-        .with_handlers(handlers)
+        .with_handlers(pitaya::handlers![hello_method])
+        .with_state(Counter {
+            value: Arc::new(Mutex::new(20)),
+        })
         .with_cluster_subscriber({
             let logger = logger.clone();
             move |notification| match notification {
@@ -110,16 +127,6 @@ async fn main() {
         });
         tasks.push(task);
     }
-
-    println!("done spawning tasks.");
-
-    println!("all requests finished!");
-
-    // info!(
-    //     logger,
-    //     "received response: {:?}",
-    //     String::from_utf8_lossy(&res.data)
-    // );
 
     println!("waiting");
     shutdown_receiver

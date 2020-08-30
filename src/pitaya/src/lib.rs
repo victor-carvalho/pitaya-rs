@@ -5,15 +5,16 @@ pub mod settings;
 
 pub use error::Error;
 pub use etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
-pub use pitaya_core::{cluster, context::Context, handler, message, metrics, protos, utils, Never};
+pub use pitaya_core::{
+    cluster, context::Context, handler, message, metrics, protos, state::State, utils, Never,
+};
 use pitaya_core::{
     cluster::server::{ServerId, ServerInfo, ServerKind},
     constants as core_constants,
 };
 use pitaya_core::{context, Route};
-pub use pitaya_macros::{handlers, json_handler, proto_handler};
+pub use pitaya_macros::{handlers, json_handler, protobuf_handler};
 use slog::{debug, error, info, o, trace, warn};
-use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
     sync::{broadcast, mpsc, oneshot, Mutex, RwLock},
@@ -39,6 +40,7 @@ pub struct Pitaya<D, S, C> {
     settings: Arc<settings::Settings>,
     metrics_reporter: metrics::ThreadSafeReporter,
     handlers: Arc<handler::Handlers>,
+    container: Arc<state::Container>,
 }
 
 impl<D, S, C> Clone for Pitaya<D, S, C>
@@ -57,6 +59,7 @@ where
             settings: self.settings.clone(),
             metrics_reporter: self.metrics_reporter.clone(),
             handlers: self.handlers.clone(),
+            container: self.container.clone(),
         }
     }
 }
@@ -76,6 +79,7 @@ where
         metrics_reporter: metrics::ThreadSafeReporter,
         settings: settings::Settings,
         handlers: Arc<handler::Handlers>,
+        container: Arc<state::Container>,
     ) -> Result<Self, Error> {
         if settings.server_kind.trim().is_empty() {
             return Err(Error::InvalidServerKind);
@@ -94,6 +98,7 @@ where
             settings: Arc::new(settings),
             metrics_reporter,
             handlers,
+            container,
         })
     }
 
@@ -277,6 +282,7 @@ where
             self.logger.new(o!("task" => "start_listen_for_rpc")),
             rpc_server_connection,
             rpc_handler,
+            self.container.clone(),
         ));
 
         self.shared_state.tasks.lock().unwrap().replace(Tasks {
@@ -313,6 +319,7 @@ where
             self.logger.new(o!("task" => "start_listen_for_rpc")),
             rpc_server_connection,
             self.handlers.clone(),
+            self.container.clone(),
         ));
 
         self.shared_state.tasks.lock().unwrap().replace(Tasks {
@@ -369,6 +376,7 @@ where
         logger: slog::Logger,
         mut rpc_server_connection: mpsc::Receiver<cluster::Rpc>,
         handlers: Arc<handler::Handlers>,
+        container: Arc<state::Container>,
     ) {
         loop {
             let maybe_rpc = rpc_server_connection.recv().await;
@@ -381,10 +389,11 @@ where
             let rpc = maybe_rpc.unwrap();
             let logger = logger.clone();
             let handlers = handlers.clone();
+            let container = container.clone();
 
             // Spawn task to handle the incoming RPC.
             let _ = tokio::spawn(async move {
-                match context::Context::try_from(rpc.request()) {
+                match context::Context::new(rpc.request(), container) {
                     Ok(ctx) => {
                         // Parse route from the request.
                         debug!(logger, "received rpc");
@@ -463,10 +472,12 @@ where
         logger: slog::Logger,
         mut rpc_server_connection: mpsc::Receiver<cluster::Rpc>,
         mut rpc_handler: Box<dyn FnMut(context::Context, cluster::Rpc) + Send + 'static>,
+        container: Arc<state::Container>,
     ) {
         loop {
+            let container = container.clone();
             match rpc_server_connection.recv().await {
-                Some(rpc) => match context::Context::try_from(rpc.request()) {
+                Some(rpc) => match context::Context::new(rpc.request(), container) {
                     Ok(ctx) => {
                         rpc_handler(ctx, rpc);
                     }
@@ -533,6 +544,7 @@ pub struct PitayaBuilder<'a> {
     base_settings: settings::Settings,
     rpc_handler: Option<Box<dyn FnMut(context::Context, cluster::Rpc) + Send + 'static>>,
     handlers: handler::Handlers,
+    container: state::Container,
 }
 
 impl<'a> PitayaBuilder<'a> {
@@ -546,6 +558,7 @@ impl<'a> PitayaBuilder<'a> {
             config_file: None,
             base_settings: Default::default(),
             handlers: handler::Handlers::new(),
+            container: state::Container::new(),
         }
     }
 
@@ -595,8 +608,15 @@ impl<'a> PitayaBuilder<'a> {
         self
     }
 
+    pub fn with_state<T: Sync + Send + 'static>(self, state: T) -> Self {
+        if !self.container.set(state) {
+            panic!("cannot set state for the given type, since it was already set");
+        }
+        self
+    }
+
     pub async fn build(
-        self,
+        mut self,
     ) -> Result<
         (
             Pitaya<EtcdLazy, NatsRpcServer, NatsRpcClient>,
@@ -651,6 +671,11 @@ impl<'a> PitayaBuilder<'a> {
             etcd_nats_cluster::EtcdLazy::new(logger.clone(), server_info.clone(), etcd_settings)
                 .await?,
         ));
+
+        // Freeze state, so we cannot modify it later.
+        self.container.freeze();
+        let container = Arc::new(self.container);
+
         let rpc_server = NatsRpcServer::new(
             logger.clone(),
             server_info.clone(),
@@ -669,6 +694,7 @@ impl<'a> PitayaBuilder<'a> {
             metrics_reporter,
             settings,
             Arc::new(self.handlers),
+            container,
         )
         .await?;
 

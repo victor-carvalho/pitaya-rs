@@ -569,7 +569,7 @@ pub extern "C" fn pitaya_send_rpc(
         let result = if server_id.len() > 0 {
             pitaya_server
                 .send_rpc_to_server(
-                    context::Context::new(),
+                    context::Context::empty(),
                     &ServerId::from(server_id.as_ref()),
                     &ServerKind::from(route.server_kind()),
                     &route_str,
@@ -579,7 +579,7 @@ pub extern "C" fn pitaya_send_rpc(
         } else {
             pitaya_server
                 .send_rpc(
-                    context::Context::new(),
+                    context::Context::empty(),
                     route_str.as_ref(),
                     request_buffer.data.clone(),
                 )

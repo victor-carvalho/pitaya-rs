@@ -16,7 +16,7 @@ async fn send_rpc(
         let msg = msg.clone();
 
         match pitaya_server
-            .send_rpc(Context::new(), "SuperKind.random.test_method", msg)
+            .send_rpc(Context::empty(), "SuperKind.random.test_method", msg)
             .await
         {
             Ok(res) => {
@@ -48,7 +48,7 @@ pub struct RpcMsg {
     pub msg: std::string::String,
 }
 
-#[pitaya::proto_handler("random")]
+#[pitaya::protobuf_handler("random")]
 async fn test_method() -> Result<RpcMsg, pitaya::Never> {
     Ok(RpcMsg {
         route: String::from(""),

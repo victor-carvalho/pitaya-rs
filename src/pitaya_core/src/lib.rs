@@ -4,6 +4,7 @@ pub mod context;
 pub mod handler;
 pub mod message;
 pub mod metrics;
+pub mod state;
 pub mod utils;
 pub mod protos {
     include!(concat!(env!("OUT_DIR"), "/protos.rs"));
@@ -18,6 +19,26 @@ pub enum Error {
 
     #[error("collistion on context key {0}")]
     ContextKeyCollistion(String),
+
+    #[error("unknown state requested from pitaya")]
+    UnknownState,
+}
+
+impl ToError for Error {
+    fn to_error(self) -> protos::Error {
+        match self {
+            Error::UnknownState => protos::Error {
+                code: constants::CODE_NOT_FOUND.into(),
+                msg: "route cannot be found".into(),
+                ..Default::default()
+            },
+            _ => protos::Error {
+                code: constants::CODE_INTERNAL_ERROR.into(),
+                msg: "internal error".into(),
+                ..Default::default()
+            },
+        }
+    }
 }
 
 #[derive(Debug)]

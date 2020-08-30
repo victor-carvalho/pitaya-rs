@@ -1,7 +1,5 @@
 use crate::{context, protos, Route};
-use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
+use std::{collections::HashMap, future::Future, pin::Pin};
 
 pub type Method = fn(
     context::Context,

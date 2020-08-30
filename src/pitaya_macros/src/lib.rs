@@ -1,9 +1,10 @@
+use devise::ext::TypeExt;
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span};
-use quote::quote;
+use quote::{quote, quote_spanned};
 use syn::{
-    parse::Parser, parse_macro_input, punctuated::Punctuated, Expr, ExprCall, ExprMethodCall,
-    ItemFn, LitStr, Path, Token,
+    parse::Parser, parse_macro_input, punctuated::Punctuated, spanned::Spanned, Expr, ExprCall,
+    ExprMethodCall, ItemFn, LitStr, Path,
 };
 
 fn get_handler_info_name(method_name: &str) -> Ident {
@@ -15,7 +16,7 @@ fn get_handler_info_name(method_name: &str) -> Ident {
 
 #[proc_macro]
 pub fn handlers(item: TokenStream) -> TokenStream {
-    let mut paths = match <Punctuated<Path, Token![,]>>::parse_terminated.parse(item) {
+    let mut paths = match <Punctuated<Path, syn::Token![,]>>::parse_terminated.parse(item) {
         Ok(p) => p,
         Err(_e) => {
             return TokenStream::from(quote! {
@@ -63,7 +64,7 @@ pub fn handlers(item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn proto_handler(attrs: TokenStream, item: TokenStream) -> TokenStream {
+pub fn protobuf_handler(attrs: TokenStream, item: TokenStream) -> TokenStream {
     common_handler(HandlerKind::Protobuf, attrs, item)
 }
 
@@ -77,8 +78,54 @@ enum HandlerKind {
     Protobuf,
 }
 
+struct CompilerError(Span, String);
+
+fn get_inputs_from_fn(
+    item_fn: &syn::ItemFn,
+) -> Result<Vec<(&syn::Ident, syn::Type, Span)>, CompilerError> {
+    let mut inputs = vec![];
+    for fn_arg in &item_fn.sig.inputs {
+        let span = fn_arg.span();
+        let (ident, ty, span) = match fn_arg {
+            syn::FnArg::Typed(arg) => match &*arg.pat {
+                syn::Pat::Ident(ref pat) => (&pat.ident, &arg.ty, span),
+                syn::Pat::Wild(_) => {
+                    return Err(CompilerError(
+                        span,
+                        "handler arguments cannot be ignored".into(),
+                    ));
+                }
+                _ => {
+                    return Err(CompilerError(span, "invalid use of pattern".into()));
+                }
+            },
+            _ => {
+                return Err(CompilerError(span, "invalid handler argument".into()));
+            }
+        };
+
+        let ty: &syn::Type = ty.as_ref();
+        inputs.push((
+            ident,
+            <syn::Type as TypeExt>::with_stripped_lifetimes(ty),
+            span,
+        ));
+    }
+    Ok(inputs)
+}
+
 fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as ItemFn);
+    let inputs = match get_inputs_from_fn(&item) {
+        Ok(i) => i,
+        Err(CompilerError(span, e)) => {
+            let lit = syn::LitStr::new(&e, Span::call_site());
+            return quote_spanned! {span=>
+                compile_error!(#lit);
+            }
+            .into();
+        }
+    };
 
     let attrs = proc_macro2::TokenStream::from(attrs);
     let handler_name_lit = match syn::parse2::<LitStr>(attrs) {
@@ -108,7 +155,16 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
         paren_token: syn::token::Paren {
             span: Span::call_site(),
         },
-        args: Punctuated::new(),
+        args: {
+            let mut p = Punctuated::new();
+            for (ident, _, _) in &inputs {
+                p.push_value(syn::Expr::Verbatim(quote! { #ident }));
+                p.push_punct(syn::token::Comma {
+                    spans: [Span::call_site()],
+                });
+            }
+            p
+        },
     };
 
     let has_return = match item.sig.output {
@@ -126,11 +182,38 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
         return quote! { compile_error!("json handlers must return Result<T, E>"); }.into();
     }
 
+    let state_declarations = {
+        let mut s = vec![];
+        for (ident, ty, _) in &inputs {
+            s.push((ident, <syn::Type as TypeExt>::with_stripped_lifetimes(ty)));
+        }
+        s
+    };
+
+    let state_declarations = state_declarations.iter().map(|(ident, ty)| {
+        quote! {
+            let #ident = match <#ty as ::pitaya_core::context::FromContext>::from_context(&ctx) {
+                ::core::result::Result::Ok(s) => s,
+                ::core::result::Result::Err(::pitaya_core::context::NotFound(s)) => {
+                    println!("did not find managed state");
+                    return ::pitaya_core::protos::Response {
+                        data: vec![],
+                        error: Some(::pitaya_core::Error::UnknownState.to_error()),
+                    };
+                }
+            };
+        }
+    }).collect::<Vec<_>>();
+
     let body = match handler_kind {
         HandlerKind::Json => quote! {
             use ::pitaya_core::ToResponseJson;
+            use ::pitaya_core::ToError;
 
-            let fut = async {
+            let fut = async move {
+                // state declarations
+                #(#state_declarations)*
+
                 let res = #func_call.await;
                 res.to_response_json()
             };
@@ -138,8 +221,12 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
         },
         HandlerKind::Protobuf => quote! {
             use ::pitaya_core::ToResponseProto;
+            use ::pitaya_core::ToError;
 
-            let fut = async {
+            let fut = async move {
+                // state declarations
+                #(#state_declarations)*
+
                 let res = #func_call.await;
                 res.to_response_proto()
             };
@@ -160,6 +247,7 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
             ctx: ::pitaya_core::context::Context,
             req: &::pitaya_core::protos::Request,
         ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ::pitaya_core::protos::Response> + Send +'static>> {
+            // calling original handler
             #body
         }
     };
