@@ -68,7 +68,7 @@ struct Counter {
     value: Arc<Mutex<i32>>,
 }
 
-#[pitaya::json_handler("hello")]
+#[pitaya::json_handler("hello", args = 0)]
 async fn hello_method(counter: State<'_, Counter>) -> Result<MyResponse, pitaya::Never> {
     let mut count = counter.value.lock().unwrap();
     *count = *count + 1;

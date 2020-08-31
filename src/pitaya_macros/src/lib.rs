@@ -127,16 +127,100 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
         }
     };
 
-    let attrs = proc_macro2::TokenStream::from(attrs);
-    let handler_name_lit = match syn::parse2::<LitStr>(attrs) {
-        Ok(l) => l,
-        Err(_e) => {
+    let parser = Punctuated::<syn::Expr, syn::Token![,]>::parse_separated_nonempty;
+    let punct = parser
+        .parse(attrs.clone())
+        .expect("failed to parse attributes");
+
+    if punct.len() < 1 || punct.len() > 2 {
+        return quote! {
+            compile_error!("invalid attribute syntax");
+        }
+        .into();
+    }
+
+    let handler_name_lit = match &punct[0] {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(lit_str),
+            ..
+        }) => lit_str,
+        _ => {
             return quote! {
-                compile_error!("can only receive strings inside attribute invocation");
+                compile_error!("invalid attribute syntax");
             }
             .into()
         }
     };
+
+    let num_args = if punct.len() > 1 {
+        match &punct[1] {
+            syn::Expr::Assign(assign) => {
+                match &*assign.left {
+                    syn::Expr::Path(syn::ExprPath {
+                        qself: None,
+                        path: path,
+                        ..
+                    }) => {
+                        let name = path
+                            .segments
+                            .last()
+                            .expect("invalid identifier for attribute");
+
+                        if name.ident != "args" {
+                            return quote! {
+                                compile_error!("was expecting 'args' argument");
+                            }
+                            .into();
+                        }
+                    }
+                    _ => {
+                        return quote! {
+                            compile_error!("invalid attribute syntax");
+                        }
+                        .into()
+                    }
+                }
+
+                match &*assign.right {
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Int(lit_int),
+                        ..
+                    }) => lit_int.base10_parse::<i32>().expect("invalid args number"),
+                    _ => {
+                        return quote! {
+                            compile_error!("invalid attribute syntax");
+                        }
+                        .into()
+                    }
+                }
+            }
+            _ => {
+                return quote! {
+                    compile_error!("invalid attribute syntax");
+                }
+                .into()
+            }
+        }
+    } else {
+        0
+    };
+
+    for expr in punct.iter() {
+        match expr {
+            syn::Expr::Lit(_) => {
+                println!("GOT LITERAL");
+            }
+            syn::Expr::Assign(_) => {
+                println!("GOT ASSIGN");
+            }
+            _ => {
+                return quote! {
+                    compile_error!("Invalid attribute syntax");
+                }
+                .into()
+            }
+        }
+    }
 
     let method_ident = item.sig.ident.clone();
     let method_name = method_ident.to_string();
