@@ -21,7 +21,7 @@ harness = false
 [dependencies]
 pitaya_core = { path = "../pitaya_core" }
 pitaya_macros = { path = "../pitaya_macros" }
-etcd_nats_cluster = { path = "../etcd_nats_cluster" }
+pitaya_etcd_nats_cluster = { path = "../pitaya_etcd_nats_cluster" }
 prometheus_metrics = { path = "../prometheus_metrics" }
 test_helpers = { path = "../test_helpers" }
 

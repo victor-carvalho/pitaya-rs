@@ -2,7 +2,7 @@
 members = [
     "src/pitaya",
     "src/pitaya_core",
-    "src/etcd_nats_cluster",
+    "src/pitaya_etcd_nats_cluster",
     "src/test_helpers",
     "src/pitaya_macros",
 ]

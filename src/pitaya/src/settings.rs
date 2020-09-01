@@ -46,10 +46,10 @@ pub struct Settings {
     pub shutdown_timeout: Duration,
 
     // ETCD related settings.
-    pub etcd: etcd_nats_cluster::settings::Etcd,
+    pub etcd: pitaya_etcd_nats_cluster::settings::Etcd,
 
     // NATS related settings.
-    pub nats: etcd_nats_cluster::settings::Nats,
+    pub nats: pitaya_etcd_nats_cluster::settings::Nats,
 
     // The kind of this server. For example, "metagame" to represent a metagame server.
     pub server_kind: String,

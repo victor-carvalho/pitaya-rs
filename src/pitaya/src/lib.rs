@@ -4,7 +4,6 @@ mod ffi;
 pub mod settings;
 
 pub use error::Error;
-pub use etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 pub use pitaya_core::{
     cluster, context::Context, handler, message, metrics, protos, state::State, utils, Never,
 };
@@ -13,6 +12,7 @@ use pitaya_core::{
     constants as core_constants,
 };
 use pitaya_core::{context, Route};
+pub use pitaya_etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 pub use pitaya_macros::{handlers, json_handler, protobuf_handler};
 use slog::{debug, error, info, o, trace, warn};
 use std::{collections::HashMap, sync::Arc};
@@ -668,8 +668,12 @@ impl<'a> PitayaBuilder<'a> {
         };
 
         let discovery = Arc::new(Mutex::new(
-            etcd_nats_cluster::EtcdLazy::new(logger.clone(), server_info.clone(), etcd_settings)
-                .await?,
+            pitaya_etcd_nats_cluster::EtcdLazy::new(
+                logger.clone(),
+                server_info.clone(),
+                etcd_settings,
+            )
+            .await?,
         ));
 
         // Freeze state, so we cannot modify it later.

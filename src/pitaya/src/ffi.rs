@@ -1,6 +1,6 @@
 use crate::{cluster, context, protos, utils, PitayaBuilder, ServerId, ServerKind};
-use etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 use pitaya_core::Route;
+use pitaya_etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 use prost::Message;
 use slog::{error, o, Drain};
 use std::{
