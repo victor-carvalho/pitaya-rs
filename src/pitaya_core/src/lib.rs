@@ -20,16 +20,32 @@ pub enum Error {
     #[error("collistion on context key {0}")]
     ContextKeyCollistion(String),
 
-    #[error("unknown state requested from pitaya")]
-    UnknownState,
+    #[error("route provided was not found")]
+    RouteNotFound,
+
+    #[error("invalid json argument to handler")]
+    InvalidJsonArgument,
+
+    #[error("invalid protobuf argument to handler")]
+    InvalidProtobufArgument,
 }
 
 impl ToError for Error {
     fn to_error(self) -> protos::Error {
         match self {
-            Error::UnknownState => protos::Error {
+            Error::RouteNotFound => protos::Error {
                 code: constants::CODE_NOT_FOUND.into(),
                 msg: "route cannot be found".into(),
+                ..Default::default()
+            },
+            Error::InvalidJsonArgument => protos::Error {
+                code: constants::CODE_BAD_FORMAT.into(),
+                msg: "received invalid json argument at handler".into(),
+                ..Default::default()
+            },
+            Error::InvalidProtobufArgument => protos::Error {
+                code: constants::CODE_BAD_FORMAT.into(),
+                msg: "received invalid protobuf argument at handler".into(),
                 ..Default::default()
             },
             _ => protos::Error {

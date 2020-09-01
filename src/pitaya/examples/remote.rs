@@ -59,8 +59,9 @@ pub struct RpcMsg {
     pub msg: std::string::String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 struct MyResponse {
+    #[prost(string, tag = "1")]
     pub my_message: String,
 }
 
@@ -68,12 +69,18 @@ struct Counter {
     value: Arc<Mutex<i32>>,
 }
 
-#[pitaya::json_handler("hello", args = 0)]
-async fn hello_method(counter: State<'_, Counter>) -> Result<MyResponse, pitaya::Never> {
+#[pitaya::protobuf_handler("hello", with_args)]
+async fn hello_method(
+    rpc_msg: RpcMsg,
+    counter: State<'_, Counter>,
+) -> Result<MyResponse, pitaya::Never> {
     let mut count = counter.value.lock().unwrap();
     *count = *count + 1;
     Ok(MyResponse {
-        my_message: format!("my awesome response: count={}", count),
+        my_message: format!(
+            "my awesome response: route={} msg={} count={}",
+            rpc_msg.route, rpc_msg.msg, count
+        ),
     })
 }
 
@@ -109,7 +116,11 @@ async fn main() {
 
     let (tx, rx) = watch::channel(false);
 
-    let msg = RpcMsg::default();
+    let msg = RpcMsg {
+        route: "client.route".into(),
+        msg: "message from client :D".into(),
+    };
+
     let msg_data = pitaya::utils::encode_proto(&msg);
 
     const NUM_CONCURRENT_TASKS: usize = 50;

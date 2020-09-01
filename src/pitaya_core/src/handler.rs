@@ -1,9 +1,9 @@
 use crate::{context, protos, Route};
 use std::{collections::HashMap, future::Future, pin::Pin};
 
-pub type Method = fn(
+pub type Method = for<'a> fn(
     context::Context,
-    &protos::Request,
+    &'a protos::Request,
 ) -> Pin<Box<dyn Future<Output = protos::Response> + Send + 'static>>;
 
 pub struct StaticHandlerInfo {

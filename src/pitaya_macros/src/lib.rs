@@ -73,6 +73,7 @@ pub fn json_handler(attrs: TokenStream, item: TokenStream) -> TokenStream {
     common_handler(HandlerKind::Json, attrs, item)
 }
 
+#[derive(Debug, Copy, Clone)]
 enum HandlerKind {
     Json,
     Protobuf,
@@ -114,6 +115,36 @@ fn get_inputs_from_fn(
     Ok(inputs)
 }
 
+fn get_deserialize_code(kind: HandlerKind, ty: &syn::Type) -> proc_macro2::TokenStream {
+    match kind {
+        HandlerKind::Json => quote! {
+            match ::serde_json::from_slice::<#ty>(&req_data) {
+                ::core::result::Result::Ok(v) => v,
+                ::core::result::Result::Err(_) => {
+                    return ::pitaya_core::protos::Response {
+                        data: vec![],
+                        error: Some(::pitaya_core::Error::InvalidJsonArgument.to_error()),
+                    };
+                },
+            }
+        },
+        HandlerKind::Protobuf => quote! {
+            {
+                use ::prost::Message;
+                match ::prost::Message::decode(req_data.as_ref()) {
+                    ::core::result::Result::Ok(v) => v,
+                    ::core::result::Result::Err(_) => {
+                        return ::pitaya_core::protos::Response {
+                            data: vec![],
+                            error: Some(::pitaya_core::Error::InvalidProtobufArgument.to_error()),
+                        };
+                    },
+                }
+            }
+        },
+    }
+}
+
 fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as ItemFn);
     let inputs = match get_inputs_from_fn(&item) {
@@ -152,75 +183,27 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
         }
     };
 
-    let num_args = if punct.len() > 1 {
+    let with_args = if punct.len() > 1 {
         match &punct[1] {
-            syn::Expr::Assign(assign) => {
-                match &*assign.left {
-                    syn::Expr::Path(syn::ExprPath {
-                        qself: None,
-                        path: path,
-                        ..
-                    }) => {
-                        let name = path
-                            .segments
-                            .last()
-                            .expect("invalid identifier for attribute");
-
-                        if name.ident != "args" {
-                            return quote! {
-                                compile_error!("was expecting 'args' argument");
-                            }
-                            .into();
-                        }
+            syn::Expr::Path(expr_path) => match expr_path.path.segments.last() {
+                Some(last_seg) if last_seg.ident == "with_args" => true,
+                _ => {
+                    return quote_spanned! {expr_path.span()=>
+                        compile_error!("invalid attribute syntax");
                     }
-                    _ => {
-                        return quote! {
-                            compile_error!("invalid attribute syntax");
-                        }
-                        .into()
-                    }
+                    .into();
                 }
-
-                match &*assign.right {
-                    syn::Expr::Lit(syn::ExprLit {
-                        lit: syn::Lit::Int(lit_int),
-                        ..
-                    }) => lit_int.base10_parse::<i32>().expect("invalid args number"),
-                    _ => {
-                        return quote! {
-                            compile_error!("invalid attribute syntax");
-                        }
-                        .into()
-                    }
-                }
-            }
+            },
             _ => {
                 return quote! {
                     compile_error!("invalid attribute syntax");
                 }
-                .into()
+                .into();
             }
         }
     } else {
-        0
+        false
     };
-
-    for expr in punct.iter() {
-        match expr {
-            syn::Expr::Lit(_) => {
-                println!("GOT LITERAL");
-            }
-            syn::Expr::Assign(_) => {
-                println!("GOT ASSIGN");
-            }
-            _ => {
-                return quote! {
-                    compile_error!("Invalid attribute syntax");
-                }
-                .into()
-            }
-        }
-    }
 
     let method_ident = item.sig.ident.clone();
     let method_name = method_ident.to_string();
@@ -266,6 +249,16 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
         return quote! { compile_error!("json handlers must return Result<T, E>"); }.into();
     }
 
+    let input_declaration = if with_args {
+        let (input_name, ty, _) = &inputs[0];
+        let deserialize_code = get_deserialize_code(handler_kind, ty);
+        quote! {
+            let #input_name: #ty = #deserialize_code;
+        }
+    } else {
+        quote! {}
+    };
+
     let state_declarations = {
         let mut s = vec![];
         for (ident, ty, _) in &inputs {
@@ -274,27 +267,39 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
         s
     };
 
-    let state_declarations = state_declarations.iter().map(|(ident, ty)| {
-        quote! {
-            let #ident = match <#ty as ::pitaya_core::context::FromContext>::from_context(&ctx) {
-                ::core::result::Result::Ok(s) => s,
-                ::core::result::Result::Err(::pitaya_core::context::NotFound(s)) => {
-                    println!("did not find managed state");
-                    return ::pitaya_core::protos::Response {
-                        data: vec![],
-                        error: Some(::pitaya_core::Error::UnknownState.to_error()),
-                    };
-                }
-            };
-        }
-    }).collect::<Vec<_>>();
+    let state_declarations = state_declarations
+        .iter()
+        .skip(if with_args { 1 } else { 0 })
+        .map(|(ident, ty)| {
+            quote! {
+                let #ident = match <#ty as ::pitaya_core::context::FromContext>::from_context(&ctx) {
+                    ::core::result::Result::Ok(s) => s,
+                    ::core::result::Result::Err(::pitaya_core::context::NotFound(s)) => {
+                        println!("did not find managed state");
+                        return ::pitaya_core::protos::Response {
+                            data: vec![],
+                            error: Some(::pitaya_core::Error::RouteNotFound.to_error()),
+                        };
+                    }
+                };
+            }
+        })
+        .collect::<Vec<_>>();
 
     let body = match handler_kind {
         HandlerKind::Json => quote! {
             use ::pitaya_core::ToResponseJson;
             use ::pitaya_core::ToError;
 
+            let req_data = match req.msg.as_ref() {
+                ::core::option::Option::Some(msg) => msg.data.clone(),
+                _ => vec![],
+            };
+
             let fut = async move {
+                // input declaration
+                #input_declaration
+
                 // state declarations
                 #(#state_declarations)*
 
@@ -307,7 +312,15 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
             use ::pitaya_core::ToResponseProto;
             use ::pitaya_core::ToError;
 
+            let req_data = match req.msg.as_ref() {
+                ::core::option::Option::Some(msg) => msg.data.clone(),
+                _ => vec![],
+            };
+
             let fut = async move {
+                // input declaration
+                #input_declaration
+
                 // state declarations
                 #(#state_declarations)*
 
@@ -327,10 +340,10 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
             method: #generated_handler,
         };
 
-        fn #generated_handler(
+        fn #generated_handler<'a>(
             ctx: ::pitaya_core::context::Context,
-            req: &::pitaya_core::protos::Request,
-        ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ::pitaya_core::protos::Response> + Send +'static>> {
+            req: &'a ::pitaya_core::protos::Request,
+        ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ::pitaya_core::protos::Response> + Send + 'static>> {
             // calling original handler
             #body
         }
