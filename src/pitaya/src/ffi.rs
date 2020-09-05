@@ -1,6 +1,6 @@
 use crate::{cluster, context, protos, utils, PitayaBuilder, ServerId, ServerKind};
 use pitaya_core::Route;
-use pitaya_etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
+use pitaya_etcd_nats_cluster::NatsRpcClient;
 use prost::Message;
 use slog::{error, o, Drain};
 use std::{
@@ -234,7 +234,7 @@ pub type PitayaHandleRpcCallback = extern "C" fn(*mut c_void, *mut PitayaContext
 struct PitayaUserData(*mut c_void);
 
 pub struct Pitaya {
-    pitaya_server: crate::Pitaya<EtcdLazy, NatsRpcServer, NatsRpcClient>,
+    pitaya_server: crate::Pitaya,
     shutdown_receiver: Option<oneshot::Receiver<()>>,
     runtime: tokio::runtime::Runtime,
 }
@@ -626,7 +626,7 @@ pub extern "C" fn pitaya_send_kick(
     let server_kind = ServerKind::from(unsafe { CStr::from_ptr(server_kind).to_string_lossy() });
     let user_data = PitayaUserData(user_data);
 
-    let mut pitaya_server = p.pitaya_server.clone();
+    let pitaya_server = p.pitaya_server.clone();
     p.runtime.spawn(async move {
         let kick_msg: protos::KickMsg = match Message::decode(kick_buffer.data.as_ref()) {
             Ok(m) => m,
@@ -684,7 +684,7 @@ pub extern "C" fn pitaya_send_push_to_user(
     let server_kind = ServerKind::from(unsafe { CStr::from_ptr(server_kind).to_string_lossy() });
     let user_data = PitayaUserData(user_data);
 
-    let mut pitaya_server = p.pitaya_server.clone();
+    let pitaya_server = p.pitaya_server.clone();
     p.runtime.spawn(async move {
         let push_msg: protos::Push = match Message::decode(push_buffer.data.as_ref()) {
             Ok(m) => m,

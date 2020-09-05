@@ -44,11 +44,14 @@ pub enum Error {
 
     #[error("rpc server already started")]
     RpcServerAlreadyStarted,
+
+    #[error("already connected")]
+    AlreadyConnected,
 }
 
 // The Discovery trait allows the program to discover other pitaya servers in the cluster.
 #[async_trait]
-pub trait Discovery {
+pub trait Discovery: Send + 'static {
     // Discover a server based on its id.
     async fn server_by_id(
         &mut self,
@@ -74,19 +77,17 @@ pub trait Discovery {
 
 // Server represents a trait for handling RPCs comming from the cluster.
 #[async_trait]
-pub trait RpcServer {
+pub trait RpcServer: Sync + Send + 'static {
     // Starts the server.
-    async fn start(&mut self) -> Result<mpsc::Receiver<Rpc>, Error>;
+    async fn start(&self) -> Result<mpsc::Receiver<Rpc>, Error>;
 
     // Shuts down the server.
-    async fn shutdown(&mut self) -> Result<(), Error>;
+    async fn shutdown(&self) -> Result<(), Error>;
 }
 
 // Client represents an RPC client for the other servers in the cluster.
 #[async_trait]
-pub trait RpcClient {
-    // func (a *Remote) SendRequest(ctx context.Context, serverID, reqRoute string, v interface{}) (*protos.Response, error) {
-
+pub trait RpcClient: Send + Sync + 'static {
     // This function sends an RPC to a given server in the cluster.
     async fn call(
         &self,
@@ -113,10 +114,10 @@ pub trait RpcClient {
     ) -> Result<(), Error>;
 
     // Starts the server.
-    async fn start(&mut self) -> Result<(), Error>;
+    async fn start(&self) -> Result<(), Error>;
 
     // Shuts down the client.
-    async fn shutdown(&mut self) -> Result<(), Error>;
+    async fn shutdown(&self) -> Result<(), Error>;
 }
 
 // A notification occurs whenever a cluster enters or exists the cluster.

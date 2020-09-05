@@ -1,12 +1,8 @@
-use pitaya::{Context, EtcdLazy, NatsRpcClient, NatsRpcServer};
+use pitaya::Context;
 use slog::{error, info, o, Drain};
 use tokio::sync::watch;
 
-async fn send_rpc(
-    mut pitaya_server: pitaya::Pitaya<EtcdLazy, NatsRpcServer, NatsRpcClient>,
-    msg: Vec<u8>,
-    rx: watch::Receiver<bool>,
-) {
+async fn send_rpc(pitaya_server: pitaya::Pitaya, msg: Vec<u8>, rx: watch::Receiver<bool>) {
     loop {
         if *rx.borrow() {
             // Received signal to quit.

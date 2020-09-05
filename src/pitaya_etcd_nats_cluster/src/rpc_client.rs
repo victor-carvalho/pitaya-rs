@@ -7,11 +7,11 @@ use pitaya_core::{
 use prost::Message;
 use slog::{error, info, trace};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
-#[derive(Clone)]
 pub struct NatsRpcClient {
     settings: Arc<settings::Nats>,
-    connection: Option<nats::Connection>,
+    connection: Arc<RwLock<Option<nats::Connection>>>,
     logger: slog::Logger,
     server_info: Arc<ServerInfo>,
 }
@@ -24,7 +24,7 @@ impl NatsRpcClient {
     ) -> Self {
         Self {
             settings,
-            connection: None,
+            connection: Arc::new(RwLock::new(None)),
             logger,
             server_info,
         }
@@ -33,19 +33,22 @@ impl NatsRpcClient {
 
 #[async_trait]
 impl RpcClient for NatsRpcClient {
-    async fn start(&mut self) -> Result<(), Error> {
-        assert!(self.connection.is_none());
+    async fn start(&self) -> Result<(), Error> {
+        if self.connection.read().await.is_some() {
+            return Err(Error::AlreadyConnected);
+        }
+
         info!(self.logger, "client connecting to nats"; "url" => &self.settings.url);
         let nc = nats::ConnectionOptions::new()
             .max_reconnects(Some(self.settings.max_reconnection_attempts as usize))
             .connect(&self.settings.url)
             .map_err(Error::Nats)?;
-        self.connection = Some(nc);
+        self.connection.write().await.replace(nc);
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), Error> {
-        if let Some(conn) = self.connection.take() {
+    async fn shutdown(&self) -> Result<(), Error> {
+        if let Some(conn) = self.connection.write().await.take() {
             conn.close();
         }
         Ok(())
@@ -61,6 +64,8 @@ impl RpcClient for NatsRpcClient {
         trace!(self.logger, "NatsRpcClient::call");
         let connection = self
             .connection
+            .read()
+            .await
             .as_ref()
             .map(|conn| conn.clone())
             .ok_or(Error::NatsConnectionNotOpen)?;
@@ -108,6 +113,8 @@ impl RpcClient for NatsRpcClient {
         trace!(self.logger, "NatsRpcClient::kick_user");
         let connection = self
             .connection
+            .read()
+            .await
             .as_ref()
             .cloned()
             .ok_or(Error::NatsConnectionNotOpen)?;
@@ -155,6 +162,8 @@ impl RpcClient for NatsRpcClient {
         trace!(self.logger, "NatsRpcClient::push_to_user");
         let connection = self
             .connection
+            .read()
+            .await
             .as_ref()
             .cloned()
             .ok_or(Error::NatsConnectionNotOpen)?;

@@ -25,6 +25,11 @@ typedef enum {
     PitayaLogLevel_Critical = 5,
 } PitayaLogLevel;
 
+/**
+ * Pitaya represent a pitaya server.
+ */
+typedef struct Pitaya Pitaya;
+
 typedef struct PitayaBuffer PitayaBuffer;
 
 typedef struct PitayaContext PitayaContext;

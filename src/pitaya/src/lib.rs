@@ -9,9 +9,8 @@ pub use pitaya_core::{
 };
 use pitaya_core::{
     cluster::server::{ServerId, ServerInfo, ServerKind},
-    constants as core_constants,
+    constants as core_constants, context, Route,
 };
-use pitaya_core::{context, Route};
 pub use pitaya_etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 pub use pitaya_macros::{handlers, json_handler, protobuf_handler};
 use slog::{debug, error, info, o, trace, warn};
@@ -31,10 +30,10 @@ struct SharedState {
 }
 
 /// Pitaya represent a pitaya server.
-pub struct Pitaya<D, S, C> {
-    discovery: Arc<Mutex<D>>,
-    rpc_server: S,
-    rpc_client: C,
+pub struct Pitaya {
+    discovery: Arc<Mutex<Box<dyn cluster::Discovery>>>,
+    rpc_server: Arc<Box<dyn cluster::RpcServer>>,
+    rpc_client: Arc<Box<dyn cluster::RpcClient>>,
     shared_state: Arc<SharedState>,
     logger: slog::Logger,
     settings: Arc<settings::Settings>,
@@ -43,12 +42,7 @@ pub struct Pitaya<D, S, C> {
     container: Arc<state::Container>,
 }
 
-impl<D, S, C> Clone for Pitaya<D, S, C>
-where
-    D: cluster::Discovery + 'static,
-    S: cluster::RpcServer + Clone + 'static,
-    C: cluster::RpcClient + Clone + 'static,
-{
+impl Clone for Pitaya {
     fn clone(&self) -> Self {
         Self {
             discovery: self.discovery.clone(),
@@ -64,18 +58,13 @@ where
     }
 }
 
-impl<D, S, C> Pitaya<D, S, C>
-where
-    D: cluster::Discovery + 'static,
-    S: cluster::RpcServer + Clone + 'static,
-    C: cluster::RpcClient + Clone + 'static,
-{
+impl Pitaya {
     async fn new<'a>(
         server_info: Arc<ServerInfo>,
         logger: slog::Logger,
-        discovery: Arc<Mutex<D>>,
-        rpc_server: S,
-        rpc_client: C,
+        discovery: Arc<Mutex<Box<dyn cluster::Discovery>>>,
+        rpc_server: Arc<Box<dyn cluster::RpcServer>>,
+        rpc_client: Arc<Box<dyn cluster::RpcClient>>,
         metrics_reporter: metrics::ThreadSafeReporter,
         settings: settings::Settings,
         handlers: Arc<handler::Handlers>,
@@ -112,7 +101,7 @@ where
         Ok(server)
     }
 
-    pub async fn shutdown(mut self) -> Result<(), Error> {
+    pub async fn shutdown(self) -> Result<(), Error> {
         let tasks = self
             .shared_state
             .tasks
@@ -187,7 +176,7 @@ where
     }
 
     pub async fn send_rpc(
-        &mut self,
+        &self,
         ctx: context::Context,
         route_str: &str,
         data: Vec<u8>,
@@ -232,7 +221,7 @@ where
     }
 
     pub async fn send_kick(
-        &mut self,
+        &self,
         server_id: ServerId,
         server_kind: ServerKind,
         kick_msg: protos::KickMsg,
@@ -245,7 +234,7 @@ where
     }
 
     pub async fn send_push_to_user(
-        &mut self,
+        &self,
         server_id: ServerId,
         server_kind: ServerKind,
         push_msg: protos::Push,
@@ -396,7 +385,7 @@ where
                 match context::Context::new(rpc.request(), container) {
                     Ok(ctx) => {
                         // Parse route from the request.
-                        debug!(logger, "received rpc");
+                        debug!(logger, "received rpc"; "req" => ?rpc.request());
 
                         let req = rpc.request();
                         if req.msg.is_none() {
@@ -615,17 +604,9 @@ impl<'a> PitayaBuilder<'a> {
         self
     }
 
-    pub async fn build(
-        mut self,
-    ) -> Result<
-        (
-            Pitaya<EtcdLazy, NatsRpcServer, NatsRpcClient>,
-            oneshot::Receiver<()>,
-        ),
-        Error,
-    > {
+    pub async fn build(mut self) -> Result<(Pitaya, oneshot::Receiver<()>), Error> {
         if self.rpc_handler.is_none() && self.handlers.is_empty() {
-            panic!("either Handlers should be defined or an RPC handler");
+            panic!("either Handlers should be defined or an RPC handler should be provided");
         }
 
         let logger = self
@@ -667,27 +648,31 @@ impl<'a> PitayaBuilder<'a> {
             Arc::new(RwLock::new(Box::new(metrics::DummyReporter {})))
         };
 
-        let discovery = Arc::new(Mutex::new(
+        let discovery: Arc<Mutex<Box<dyn cluster::Discovery>>> = Arc::new(Mutex::new(Box::new(
             pitaya_etcd_nats_cluster::EtcdLazy::new(
                 logger.clone(),
                 server_info.clone(),
                 etcd_settings,
             )
             .await?,
-        ));
+        )));
 
         // Freeze state, so we cannot modify it later.
         self.container.freeze();
         let container = Arc::new(self.container);
 
-        let rpc_server = NatsRpcServer::new(
+        let rpc_server: Arc<Box<dyn cluster::RpcServer>> = Arc::new(Box::new(NatsRpcServer::new(
             logger.clone(),
             server_info.clone(),
             nats_settings.clone(),
             tokio::runtime::Handle::current(),
             metrics_reporter.clone(),
-        );
-        let rpc_client = NatsRpcClient::new(logger.clone(), nats_settings, server_info.clone());
+        )));
+        let rpc_client: Arc<Box<dyn cluster::RpcClient>> = Arc::new(Box::new(NatsRpcClient::new(
+            logger.clone(),
+            nats_settings,
+            server_info.clone(),
+        )));
 
         let mut p = Pitaya::new(
             server_info,

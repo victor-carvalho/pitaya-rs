@@ -7,11 +7,9 @@ use pitaya_core::{
 };
 use prost::Message;
 use slog::{debug, error, info, o, trace, warn};
-use std::sync::Arc;
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 use tokio::sync::{mpsc, oneshot, RwLock};
 
-#[derive(Clone)]
 pub struct NatsRpcServer {
     settings: Arc<settings::Nats>,
     connection: Arc<RwLock<Option<(nats::Connection, nats::subscription::Handler)>>>,
@@ -177,7 +175,7 @@ impl NatsRpcServer {
 #[async_trait]
 impl RpcServer for NatsRpcServer {
     // Starts the server.
-    async fn start(&mut self) -> Result<mpsc::Receiver<Rpc>, Error> {
+    async fn start(&self) -> Result<mpsc::Receiver<Rpc>, Error> {
         // Register relevant metrics.
         self.register_metrics().await;
 
@@ -228,7 +226,7 @@ impl RpcServer for NatsRpcServer {
     }
 
     // Shuts down the server.
-    async fn shutdown(&mut self) -> Result<(), Error> {
+    async fn shutdown(&self) -> Result<(), Error> {
         if let Some((connection, sub_handler)) = self.connection.write().await.take() {
             sub_handler.unsubscribe().map_err(Error::Nats)?;
             connection.close();

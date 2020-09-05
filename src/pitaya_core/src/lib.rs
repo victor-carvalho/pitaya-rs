@@ -4,6 +4,8 @@ pub mod context;
 pub mod handler;
 pub mod message;
 pub mod metrics;
+pub mod service;
+pub mod session;
 pub mod state;
 pub mod utils;
 pub mod protos {
