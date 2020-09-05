@@ -29,6 +29,12 @@ struct SharedState {
     tasks: std::sync::Mutex<Option<Tasks>>,
 }
 
+struct ClusterComponents {
+    discovery: Arc<Mutex<Box<dyn cluster::Discovery>>>,
+    rpc_server: Arc<Box<dyn cluster::RpcServer>>,
+    rpc_client: Arc<Box<dyn cluster::RpcClient>>,
+}
+
 /// Pitaya represent a pitaya server.
 pub struct Pitaya {
     discovery: Arc<Mutex<Box<dyn cluster::Discovery>>>,
@@ -62,9 +68,7 @@ impl Pitaya {
     async fn new<'a>(
         server_info: Arc<ServerInfo>,
         logger: slog::Logger,
-        discovery: Arc<Mutex<Box<dyn cluster::Discovery>>>,
-        rpc_server: Arc<Box<dyn cluster::RpcServer>>,
-        rpc_client: Arc<Box<dyn cluster::RpcClient>>,
+        cluster_components: ClusterComponents,
         metrics_reporter: metrics::ThreadSafeReporter,
         settings: settings::Settings,
         handlers: Arc<handler::Handlers>,
@@ -80,9 +84,9 @@ impl Pitaya {
             shared_state: Arc::new(SharedState {
                 tasks: std::sync::Mutex::new(None),
             }),
-            discovery,
-            rpc_client,
-            rpc_server,
+            discovery: cluster_components.discovery,
+            rpc_client: cluster_components.rpc_client,
+            rpc_server: cluster_components.rpc_server,
             logger,
             settings: Arc::new(settings),
             metrics_reporter,
@@ -183,7 +187,7 @@ impl Pitaya {
     ) -> Result<protos::Response, Error> {
         debug!(self.logger, "sending rpc");
 
-        let route = Route::from_str(route_str.to_string()).ok_or(Error::InvalidRoute)?;
+        let route = Route::try_from_str(route_str.to_string()).ok_or(Error::InvalidRoute)?;
         let server_kind = ServerKind::from(route.server_kind());
 
         debug!(self.logger, "getting servers");
@@ -341,22 +345,18 @@ impl Pitaya {
             _ = signal_hangup.recv() => {
                 warn!(logger, "received hangup signal");
                 let _ = graceful_shutdown_sender.send(());
-                return;
             }
             _ = signal_interrupt.recv() => {
                 warn!(logger, "received interrupt signal");
                 let _ = graceful_shutdown_sender.send(());
-                return;
             }
             _ = signal_terminate.recv() => {
                 warn!(logger, "received terminate signal");
                 let _ = graceful_shutdown_sender.send(());
-                return;
             }
             _ = app_die_receiver.recv() => {
                 warn!(logger, "received app die message");
                 let _ = graceful_shutdown_sender.send(());
-                return;
             }
         }
     }
@@ -401,7 +401,7 @@ impl Pitaya {
                         }
 
                         let msg = req.msg.as_ref().unwrap();
-                        let maybe_route = Route::from_str(msg.route.to_string());
+                        let maybe_route = Route::try_from_str(msg.route.to_string());
 
                         if maybe_route.is_none() {
                             warn!(logger, "received rpc with invalid route"; "route" => %msg.route);
@@ -536,6 +536,12 @@ pub struct PitayaBuilder<'a> {
     container: state::Container,
 }
 
+impl<'a> Default for PitayaBuilder<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> PitayaBuilder<'a> {
     pub fn new() -> Self {
         Self {
@@ -613,7 +619,7 @@ impl<'a> PitayaBuilder<'a> {
             .logger
             .expect("a logger should be passed to PitayaBuilder");
         let settings =
-            settings::Settings::new(self.base_settings, self.env_prefix, self.config_file)?;
+            settings::Settings::merge(self.base_settings, self.env_prefix, self.config_file)?;
         let etcd_settings = Arc::new(settings.etcd.clone());
         let nats_settings = Arc::new(settings.nats.clone());
         let server_id = uuid::Uuid::new_v4().to_string();
@@ -677,9 +683,11 @@ impl<'a> PitayaBuilder<'a> {
         let mut p = Pitaya::new(
             server_info,
             logger,
-            discovery,
-            rpc_server,
-            rpc_client,
+            ClusterComponents {
+                discovery,
+                rpc_server,
+                rpc_client,
+            },
             metrics_reporter,
             settings,
             Arc::new(self.handlers),

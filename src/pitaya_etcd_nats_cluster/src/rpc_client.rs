@@ -127,7 +127,7 @@ impl RpcClient for NatsRpcClient {
             return Err(Error::EmptyServerKind);
         }
 
-        let request_timeout = self.settings.request_timeout.clone();
+        let request_timeout = self.settings.request_timeout;
         let res = tokio::task::spawn_blocking(move || -> Result<protos::KickAnswer, Error> {
             let topic = utils::user_kick_topic(&kick_msg.user_id, &server_kind);
             let kick_buffer = utils::encode_proto(&kick_msg);
@@ -175,7 +175,7 @@ impl RpcClient for NatsRpcClient {
             return Err(Error::EmptyServerKind);
         }
 
-        let request_timeout = self.settings.request_timeout.clone();
+        let request_timeout = self.settings.request_timeout;
         let res = tokio::task::spawn_blocking(move || -> Result<(), Error> {
             let topic = utils::user_messages_topic(&push_msg.uid, &server_kind);
             let push_buffer = utils::encode_proto(&push_msg);
@@ -234,7 +234,7 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn nats_fails_connection() {
-        let mut client = NatsRpcClient::new(
+        let client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
             Arc::new(settings::Nats {
                 url: "https://nats-io.server:3241".to_owned(),
@@ -321,7 +321,7 @@ mod tests {
 
         let mut service_discovery = start_service_disovery(sv.clone()).await?;
 
-        let mut client = NatsRpcClient::new(
+        let client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
             Arc::new(settings::Nats {
                 request_timeout: Duration::from_millis(300),

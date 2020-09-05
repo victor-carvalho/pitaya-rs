@@ -1,6 +1,5 @@
 use crate::{cluster, context, protos, utils, PitayaBuilder, ServerId, ServerKind};
 use pitaya_core::Route;
-use pitaya_etcd_nats_cluster::NatsRpcClient;
 use prost::Message;
 use slog::{error, o, Drain};
 use std::{
@@ -553,7 +552,7 @@ pub extern "C" fn pitaya_send_rpc(
     let route_str = route_str.to_string();
     let mut pitaya_server = p.pitaya_server.clone();
     p.runtime.spawn(async move {
-        let route = match Route::from_str(route_str.to_string()) {
+        let route = match Route::try_from_str(route_str.to_string()) {
             Some(r) => r,
             None => {
                 error!(logger, "failed to convert route"; "route" => %route_str);

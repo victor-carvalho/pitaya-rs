@@ -28,7 +28,7 @@ pub(super) async fn lease_keep_alive(
                 // Figure out if a more robust retrying scheme is necessary here.
                 if let Err(e) = keeper.keep_alive().await {
                     error!(logger, "failed keep alive request: {}", e);
-                    if let Err(_) = app_die_chan.send(()) {
+                    if app_die_chan.send(()).is_err() {
                         error!(logger, "failed to send die message");
                     }
                     return;
@@ -102,7 +102,7 @@ pub(super) async fn watch_task(
 
                     match event.event_type() {
                         etcd_client::EventType::Put => {
-                            if let None = parse_server_kind_and_id(&prefix, key_str) {
+                            if parse_server_kind_and_id(&prefix, key_str).is_none() {
                                 continue;
                             };
 
@@ -148,7 +148,7 @@ pub(super) async fn watch_task(
                 // FIXME, TODO(lhahn): should we send an event to kill the pod here?
                 // panic!("failed to get watch message: {}", e);
                 error!(logger, "watch error"; "error" => %e);
-                if let Err(_) = app_die_sender.send(()) {
+                if app_die_sender.send(()).is_err() {
                     warn!(logger, "receiver side not listening");
                 }
                 return;

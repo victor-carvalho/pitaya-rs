@@ -72,7 +72,7 @@ impl Default for Settings {
 }
 
 impl Settings {
-    pub fn new(
+    pub fn merge(
         base: Self,
         env_prefix: Option<&str>,
         filename: Option<&str>,

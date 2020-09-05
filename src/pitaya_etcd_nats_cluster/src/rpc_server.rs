@@ -273,7 +273,7 @@ mod tests {
                             data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
                             error: None,
                         };
-                        if let Err(_e) = rpc.responder().send(res) {
+                        if rpc.responder().send(res).is_err() {
                             panic!("failed to respond rpc");
                         }
                     } else {

@@ -159,11 +159,9 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
     };
 
     let parser = Punctuated::<syn::Expr, syn::Token![,]>::parse_separated_nonempty;
-    let punct = parser
-        .parse(attrs.clone())
-        .expect("failed to parse attributes");
+    let punct = parser.parse(attrs).expect("failed to parse attributes");
 
-    if punct.len() < 1 || punct.len() > 2 {
+    if punct.is_empty() || punct.len() > 2 {
         return quote! {
             compile_error!("invalid attribute syntax");
         }

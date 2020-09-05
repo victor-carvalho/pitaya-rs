@@ -30,7 +30,7 @@ impl ServersCache {
     }
 
     fn by_id(&self, id: &ServerId) -> Option<Arc<ServerInfo>> {
-        self.servers_by_id.get(id).map(|s| s.clone())
+        self.servers_by_id.get(id).cloned()
     }
 
     pub(crate) fn insert(&mut self, server: Arc<ServerInfo>) {
@@ -52,16 +52,14 @@ impl ServersCache {
             .and_modify(|servers| {
                 servers.insert(server.id.clone(), server.clone());
             })
-            .or_insert(HashMap::from_iter(
-                [(server.id.clone(), server)].iter().cloned(),
-            ));
+            .or_insert_with(|| HashMap::from_iter([(server.id.clone(), server)].iter().cloned()));
     }
 
     pub(crate) fn remove(&mut self, server_kind: &ServerKind, server_id: &ServerId) {
-        self.servers_by_id.remove(server_id).map(|server| {
+        if let Some(server) = self.servers_by_id.remove(server_id) {
             debug!(self.logger, "server removed from cache"; "server_id" => &server_id.0);
             self.notify(Notification::ServerRemoved(server));
-        });
+        }
         self.servers_by_kind.remove(server_kind);
     }
 
@@ -191,7 +189,7 @@ impl EtcdLazy {
         self.keep_alive_task = Some((
             tokio::spawn(tasks::lease_keep_alive(
                 self.logger.new(o!("task" => "keep_alive")),
-                self.settings.lease_ttl.clone(),
+                self.settings.lease_ttl,
                 keeper,
                 stream,
                 stop_receiver,
@@ -255,8 +253,8 @@ impl EtcdLazy {
             .unwrap()
             .servers_by_kind
             .get(server_kind)
-            .map(|servers_hash| servers_hash.values().map(|v| v.clone()).collect())
-            .unwrap_or(Vec::new())
+            .map(|servers_hash| servers_hash.values().cloned().collect())
+            .unwrap_or_default()
     }
 
     // This function only returns the server without trying to cache servers.
@@ -278,7 +276,7 @@ impl Discovery for EtcdLazy {
         info!(self.logger, "stopping etcd service discovery");
         if let Some((handle, sender)) = self.keep_alive_task.take() {
             info!(self.logger, "cancelling keep alive task");
-            if let Err(_) = sender.send(()) {
+            if sender.send(()).is_err() {
                 error!(self.logger, "failed to send stop message");
             }
             if let Err(e) = handle.await {
@@ -326,7 +324,7 @@ impl Discovery for EtcdLazy {
         server_kind: &ServerKind,
     ) -> Result<Vec<Arc<ServerInfo>>, Error> {
         let servers = self.only_servers_by_kind(server_kind);
-        if servers.len() == 0 {
+        if servers.is_empty() {
             // No servers were found, we'll try to fetch servers information from etcd.
             self.cache_server_kind(server_kind).await?;
         }

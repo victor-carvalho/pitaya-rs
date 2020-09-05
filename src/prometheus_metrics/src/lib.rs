@@ -59,7 +59,7 @@ impl Reporter for PrometheusReporter {
         let handle = tokio::spawn(start_server(
             self.registry.clone(),
             self.logger.clone(),
-            self.addr.clone(),
+            self.addr,
             rx,
         ));
 
@@ -72,15 +72,16 @@ impl Reporter for PrometheusReporter {
 
     async fn shutdown(&mut self) -> Result<(), Error> {
         if let Some(sender) = self.shutdown_sender.take() {
-            if let Err(_) = sender.send(()) {
+            if sender.send(()).is_err() {
                 error!(self.logger, "failed to send shutdown signal");
             }
         }
-        if let Err(_) = self
+        if self
             .server_handle
             .as_mut()
             .expect("server handle should exist")
             .await
+            .is_err()
         {
             error!(self.logger, "metrics server panicked");
         }
@@ -168,10 +169,7 @@ async fn start_server(
     let server = Server::bind(&addr).serve(make_svc);
     info!(logger, "started metrics server"; "addr" => %addr);
     let graceful = server.with_graceful_shutdown(async move {
-        match shutdown_signal.await {
-            Err(_) => (),
-            Ok(_) => (),
-        }
+        let _ = shutdown_signal.await;
     });
     if let Err(err) = graceful.await {
         error!(logger, "server error"; "error" => %err);

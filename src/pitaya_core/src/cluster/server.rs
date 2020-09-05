@@ -10,6 +10,12 @@ impl ServerKind {
     }
 }
 
+impl Default for ServerKind {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<S> From<S> for ServerKind
 where
     S: std::string::ToString,
@@ -25,6 +31,12 @@ pub struct ServerId(pub String);
 impl ServerId {
     pub fn new() -> Self {
         Self(String::new())
+    }
+}
+
+impl Default for ServerId {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
