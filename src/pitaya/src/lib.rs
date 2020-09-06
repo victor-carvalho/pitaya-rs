@@ -368,41 +368,6 @@ impl Pitaya {
         }
     }
 
-    async fn start_listen_for_rpc_task(
-        logger: slog::Logger,
-        mut rpc_server_connection: mpsc::Receiver<cluster::Rpc>,
-        mut rpc_handler: Box<dyn FnMut(context::Context, cluster::Rpc) + Send + 'static>,
-        container: Arc<state::Container>,
-    ) {
-        loop {
-            let container = container.clone();
-            match rpc_server_connection.recv().await {
-                Some(rpc) => match context::Context::new(rpc.request(), container) {
-                    Ok(ctx) => {
-                        rpc_handler(ctx, rpc);
-                    }
-                    Err(e) => {
-                        let response = protos::Response {
-                            error: Some(protos::Error {
-                                code: core_constants::CODE_BAD_FORMAT.to_string(),
-                                msg: format!("invalid request: {}", e),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        };
-                        if !rpc.respond(response) {
-                            error!(logger, "failed to respond to rpc");
-                        }
-                    }
-                },
-                None => {
-                    debug!(logger, "listen rpc task exiting");
-                    break;
-                }
-            }
-        }
-    }
-
     pub async fn add_cluster_subscriber(
         &mut self,
         mut subscriber: Box<dyn FnMut(cluster::Notification) + Send + 'static>,
