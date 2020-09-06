@@ -9,7 +9,7 @@ pub use pitaya_core::{
 };
 use pitaya_core::{
     cluster::server::{ServerId, ServerInfo, ServerKind},
-    constants as core_constants, context, Route,
+    constants as core_constants, context, service, Route,
 };
 pub use pitaya_etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 pub use pitaya_macros::{handlers, json_handler, protobuf_handler};
@@ -44,8 +44,8 @@ pub struct Pitaya {
     logger: slog::Logger,
     settings: Arc<settings::Settings>,
     metrics_reporter: metrics::ThreadSafeReporter,
-    handlers: Arc<handler::Handlers>,
     container: Arc<state::Container>,
+    remote: Arc<service::Remote>,
 }
 
 impl Clone for Pitaya {
@@ -58,8 +58,8 @@ impl Clone for Pitaya {
             logger: self.logger.clone(),
             settings: self.settings.clone(),
             metrics_reporter: self.metrics_reporter.clone(),
-            handlers: self.handlers.clone(),
             container: self.container.clone(),
+            remote: self.remote.clone(),
         }
     }
 }
@@ -71,7 +71,7 @@ impl Pitaya {
         cluster_components: ClusterComponents,
         metrics_reporter: metrics::ThreadSafeReporter,
         settings: settings::Settings,
-        handlers: Arc<handler::Handlers>,
+        rpc_dispatch: service::RpcDispatch,
         container: Arc<state::Container>,
     ) -> Result<Self, Error> {
         if settings.server_kind.trim().is_empty() {
@@ -79,6 +79,13 @@ impl Pitaya {
         }
 
         debug!(logger, "init"; "settings" => ?settings, "server_info" => ?server_info);
+        let remote = Arc::new(service::Remote::new(
+            logger.new(o!()),
+            cluster_components.discovery.clone(),
+            cluster_components.rpc_server.clone(),
+            cluster_components.rpc_client.clone(),
+            rpc_dispatch,
+        ));
 
         Ok(Self {
             shared_state: Arc::new(SharedState {
@@ -90,8 +97,8 @@ impl Pitaya {
             logger,
             settings: Arc::new(settings),
             metrics_reporter,
-            handlers,
             container,
+            remote,
         })
     }
 
@@ -249,48 +256,6 @@ impl Pitaya {
         Ok(())
     }
 
-    async fn start_with_rpc_handler(
-        &mut self,
-        rpc_handler: Box<dyn FnMut(context::Context, cluster::Rpc) + Send + 'static>,
-    ) -> Result<oneshot::Receiver<()>, Error> {
-        info!(self.logger, "starting pitaya server");
-
-        let (graceful_shutdown_sender, graceful_shutdown_receiver) = oneshot::channel();
-
-        // NOTE(lhahn): I don't expect that we'll attemp to send more than 20 die messages.
-        let (app_die_sender, app_die_receiver) = broadcast::channel(20);
-
-        self.metrics_reporter.write().await.start().await.unwrap();
-
-        let graceful_shutdown = tokio::spawn(Self::graceful_shutdown_task(
-            self.logger.new(o!("task" => "graceful_shutdown")),
-            graceful_shutdown_sender,
-            app_die_receiver,
-        ));
-
-        self.rpc_client.start().await?;
-
-        let rpc_server_connection = self.rpc_server.start().await?;
-        let listen_for_rpc = tokio::spawn(Self::start_listen_for_rpc_task(
-            self.logger.new(o!("task" => "start_listen_for_rpc")),
-            rpc_server_connection,
-            rpc_handler,
-            self.container.clone(),
-        ));
-
-        self.shared_state.tasks.lock().unwrap().replace(Tasks {
-            listen_for_rpc,
-            graceful_shutdown,
-        });
-
-        // Always start the service discovery last, since before getting RPCs we need to make
-        // sure that the server is set up.
-        self.discovery.lock().await.start(app_die_sender).await?;
-
-        info!(self.logger, "finshed starting pitaya server");
-        Ok(graceful_shutdown_receiver)
-    }
-
     async fn start(&mut self) -> Result<oneshot::Receiver<()>, Error> {
         info!(self.logger, "starting pitaya server");
 
@@ -311,8 +276,8 @@ impl Pitaya {
         let listen_for_rpc = tokio::spawn(Self::start_handlers_task(
             self.logger.new(o!("task" => "start_listen_for_rpc")),
             rpc_server_connection,
-            self.handlers.clone(),
             self.container.clone(),
+            self.remote.clone(),
         ));
 
         self.shared_state.tasks.lock().unwrap().replace(Tasks {
@@ -364,8 +329,8 @@ impl Pitaya {
     async fn start_handlers_task(
         logger: slog::Logger,
         mut rpc_server_connection: mpsc::Receiver<cluster::Rpc>,
-        handlers: Arc<handler::Handlers>,
         container: Arc<state::Container>,
+        remote: Arc<service::Remote>,
     ) {
         loop {
             let maybe_rpc = rpc_server_connection.recv().await;
@@ -377,8 +342,8 @@ impl Pitaya {
 
             let rpc = maybe_rpc.unwrap();
             let logger = logger.clone();
-            let handlers = handlers.clone();
             let container = container.clone();
+            let remote = remote.clone();
 
             // Spawn task to handle the incoming RPC.
             let _ = tokio::spawn(async move {
@@ -387,61 +352,7 @@ impl Pitaya {
                         // Parse route from the request.
                         debug!(logger, "received rpc"; "req" => ?rpc.request());
 
-                        let req = rpc.request();
-                        if req.msg.is_none() {
-                            warn!(logger, "received rpc without message");
-                            let response = utils::build_error_response(
-                                core_constants::CODE_BAD_FORMAT,
-                                "received RPC without message",
-                            );
-                            if !rpc.respond(response) {
-                                error!(logger, "failed to respond to rpc");
-                            }
-                            return;
-                        }
-
-                        let msg = req.msg.as_ref().unwrap();
-                        let maybe_route = Route::try_from_str(msg.route.to_string());
-
-                        if maybe_route.is_none() {
-                            warn!(logger, "received rpc with invalid route"; "route" => %msg.route);
-                            let response = utils::build_error_response(
-                                core_constants::CODE_BAD_FORMAT,
-                                format!("invalid route: {}", msg.route),
-                            );
-                            if !rpc.respond(response) {
-                                error!(logger, "failed to respond to rpc");
-                            }
-                            return;
-                        }
-
-                        // Having the route, we need to find the correct handler and method for it.
-                        let route = maybe_route.unwrap();
-                        let maybe_method = handlers.get(&route);
-
-                        if maybe_method.is_none() {
-                            warn!(logger, "route was not found"; "route" => %msg.route);
-                            let response = utils::build_error_response(
-                                core_constants::CODE_NOT_FOUND,
-                                format!("route not found: {}", msg.route),
-                            );
-                            if !rpc.respond(response) {
-                                error!(logger, "failed to respond to rpc");
-                            }
-                            return;
-                        }
-
-                        let method = maybe_method.unwrap();
-                        let result = method(ctx, rpc.request());
-                        let response = result.await;
-
-                        if response.error.is_some() {
-                            error!(logger, "handler returning error for RPC");
-                        }
-
-                        if !rpc.respond(response) {
-                            error!(logger, "failed to respond to rpc");
-                        }
+                        remote.process_rpc(ctx, rpc).await;
                     }
                     Err(e) => {
                         let response = utils::build_error_response(
@@ -531,8 +442,9 @@ pub struct PitayaBuilder<'a> {
     env_prefix: Option<&'a str>,
     config_file: Option<&'a str>,
     base_settings: settings::Settings,
-    rpc_handler: Option<Box<dyn FnMut(context::Context, cluster::Rpc) + Send + 'static>>,
-    handlers: handler::Handlers,
+    rpc_handler: Option<Box<dyn Fn(context::Context, cluster::Rpc) + Send + Sync + 'static>>,
+    client_handlers: handler::Handlers,
+    server_handlers: handler::Handlers,
     container: state::Container,
 }
 
@@ -552,7 +464,8 @@ impl<'a> PitayaBuilder<'a> {
             env_prefix: None,
             config_file: None,
             base_settings: Default::default(),
-            handlers: handler::Handlers::new(),
+            client_handlers: handler::Handlers::new(),
+            server_handlers: handler::Handlers::new(),
             container: state::Container::new(),
         }
     }
@@ -562,8 +475,13 @@ impl<'a> PitayaBuilder<'a> {
         self
     }
 
-    pub fn with_handlers(mut self, handlers: handler::Handlers) -> Self {
-        self.handlers = handlers;
+    pub fn with_client_handlers(mut self, handlers: handler::Handlers) -> Self {
+        self.client_handlers = handlers;
+        self
+    }
+
+    pub fn with_server_handlers(mut self, handlers: handler::Handlers) -> Self {
+        self.server_handlers = handlers;
         self
     }
 
@@ -574,7 +492,7 @@ impl<'a> PitayaBuilder<'a> {
 
     pub fn with_rpc_handler(
         mut self,
-        handler: Box<dyn FnMut(context::Context, cluster::Rpc) + Send + 'static>,
+        handler: Box<dyn Fn(context::Context, cluster::Rpc) + Send + Sync + 'static>,
     ) -> Self {
         self.rpc_handler.replace(handler);
         self
@@ -611,8 +529,10 @@ impl<'a> PitayaBuilder<'a> {
     }
 
     pub async fn build(mut self) -> Result<(Pitaya, oneshot::Receiver<()>), Error> {
-        if self.rpc_handler.is_none() && self.handlers.is_empty() {
-            panic!("either Handlers should be defined or an RPC handler should be provided");
+        if self.rpc_handler.is_none()
+            && (self.client_handlers.is_empty() && self.server_handlers.is_empty())
+        {
+            panic!("either client and server handlers should be defined or an RPC handler should be provided");
         }
 
         let logger = self
@@ -680,6 +600,15 @@ impl<'a> PitayaBuilder<'a> {
             server_info.clone(),
         )));
 
+        let rpc_dispatch = if let Some(rpc_handler) = self.rpc_handler {
+            service::RpcDispatch::Raw(rpc_handler)
+        } else {
+            service::RpcDispatch::Handlers {
+                client: Arc::new(self.client_handlers),
+                server: Arc::new(self.server_handlers),
+            }
+        };
+
         let mut p = Pitaya::new(
             server_info,
             logger,
@@ -690,7 +619,7 @@ impl<'a> PitayaBuilder<'a> {
             },
             metrics_reporter,
             settings,
-            Arc::new(self.handlers),
+            rpc_dispatch,
             container,
         )
         .await?;
@@ -699,12 +628,7 @@ impl<'a> PitayaBuilder<'a> {
             p.add_cluster_subscriber(subscriber).await;
         }
 
-        if let Some(rpc_handler) = self.rpc_handler {
-            let shutdown_receiver = p.start_with_rpc_handler(rpc_handler).await?;
-            Ok((p, shutdown_receiver))
-        } else {
-            let shutdown_receiver = p.start().await?;
-            Ok((p, shutdown_receiver))
-        }
+        let shutdown_receiver = p.start().await?;
+        Ok((p, shutdown_receiver))
     }
 }

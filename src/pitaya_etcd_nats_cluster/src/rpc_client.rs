@@ -67,7 +67,7 @@ impl RpcClient for NatsRpcClient {
             .read()
             .await
             .as_ref()
-            .map(|conn| conn.clone())
+            .cloned()
             .ok_or(Error::NatsConnectionNotOpen)?;
 
         let req = utils::build_request(ctx, rpc_type, msg, self.server_info.clone())
@@ -80,7 +80,7 @@ impl RpcClient for NatsRpcClient {
             "sending nats request"; "topic" => &topic, "timeout" => self.settings.request_timeout.as_secs()
         );
 
-        let request_timeout = self.settings.request_timeout.clone();
+        let request_timeout = self.settings.request_timeout;
 
         // We do a spawn_blocking here, since it otherwise will block the executor thread.
         let res = tokio::task::spawn_blocking(move || -> Result<protos::Response, Error> {

@@ -1,22 +1,6 @@
 use serde::{Deserialize, Serialize};
 use slog::{error, o, Drain};
 
-// #[derive(Deserialize)]
-// struct UserMessage {
-//     name: String,
-//     content: String,
-// }
-
-// #[derive(Deserialize)]
-// struct NewUser {
-//     content: String,
-// }
-
-// #[derive(Deserialize)]
-// struct AllMembers {
-//     members: Vec<String>,
-// }
-
 #[derive(Serialize)]
 struct JoinResponse {
     code: i32,
@@ -70,7 +54,8 @@ async fn main() {
             ..Default::default()
         })
         .with_logger(logger.clone())
-        .with_handlers(pitaya::handlers![room::entry])
+        .with_client_handlers(pitaya::handlers![room::entry])
+        // .with_server_handlers(pitaya::handlers![room::entry])
         .build()
         .await
         .expect("failed to startup pitaya");

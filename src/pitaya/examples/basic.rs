@@ -57,13 +57,12 @@ async fn main() {
     let root_logger = init_logger();
     let logger = root_logger.clone();
 
-    let handlers = pitaya::handlers![test_method];
-
     let (pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
         .with_env_prefix("MY_ENV")
         .with_config_file("examples/config/production.yaml")
         .with_logger(root_logger)
-        .with_handlers(handlers)
+        .with_client_handlers(pitaya::handlers![test_method])
+        .with_server_handlers(pitaya::handlers![test_method])
         .with_cluster_subscriber({
             let logger = logger.clone();
             move |notification| match notification {
