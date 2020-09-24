@@ -120,8 +120,12 @@ impl EtcdLazy {
         })
     }
 
-    fn server_kind_prefix(&self, server_kind: &ServerKind) -> String {
-        format!("{}/servers/{}/", self.settings.prefix, server_kind.0)
+    fn server_kind_prefix(&self, server_kind: Option<&ServerKind>) -> String {
+        if let Some(kind) = server_kind {
+            format!("{}/servers/{}/", self.settings.prefix, kind.0)
+        } else {
+            format!("{}/servers/", self.settings.prefix)
+        }
     }
 
     async fn revoke_lease(&mut self) -> Result<(), etcd_client::Error> {
@@ -134,11 +138,18 @@ impl EtcdLazy {
         Ok(())
     }
 
-    async fn cache_server_kind(&mut self, server_kind: &ServerKind) -> Result<(), Error> {
-        debug!(
-            self.logger,
-            "server id not found in cache, filling cache for kind {}", server_kind.0
-        );
+    async fn cache_servers(&mut self, server_kind: Option<&ServerKind>) -> Result<(), Error> {
+        if let Some(kind) = server_kind {
+            debug!(
+                self.logger,
+                "server id not found in cache, filling cache for kind {}", kind.0,
+            );
+        } else {
+            warn!(
+                self.logger,
+                "server id not found in cache, filling all ETCD servers",
+            );
+        }
         let resp = {
             let key_prefix = self.server_kind_prefix(server_kind);
             self.client
@@ -146,6 +157,9 @@ impl EtcdLazy {
                 .await
                 .map_err(|e| Error::ClusterCommunication(e.to_string()))?
         };
+        // TODO(lhahn): add a metric here to know how much keys a server is fetching in one
+        // single request. This might be useful in the future for debugging issues with
+        // ETCD load.
         debug!(self.logger, "etcd returned {} keys", resp.kvs().len());
         for kv in resp.kvs() {
             match kv.value_str() {
@@ -301,20 +315,15 @@ impl Discovery for EtcdLazy {
     async fn server_by_id(
         &mut self,
         server_id: &ServerId,
-        server_kind: &ServerKind,
+        server_kind: Option<&ServerKind>,
     ) -> Result<Option<Arc<ServerInfo>>, Error> {
         if let Some(server) = self.only_server_by_id(server_id) {
             return Ok(Some(server));
         }
-        let resp = {
-            let key_prefix = self.server_kind_prefix(server_kind);
-            self.client
-                .get(key_prefix, Some(GetOptions::new().with_prefix()))
-                .await
-                .map_err(|e| Error::ClusterCommunication(e.to_string()))?
-        };
-        info!(self.logger, "etcd returned {} keys", resp.kvs().len());
-        self.cache_server_kind(server_kind).await?;
+
+        // If a server id was provided, we can cache it from ETCD, otherwise we'll
+        // do an expensive search.
+        self.cache_servers(server_kind).await?;
 
         Ok(self.only_server_by_id(server_id))
     }
@@ -326,7 +335,7 @@ impl Discovery for EtcdLazy {
         let servers = self.only_servers_by_kind(server_kind);
         if servers.is_empty() {
             // No servers were found, we'll try to fetch servers information from etcd.
-            self.cache_server_kind(server_kind).await?;
+            self.cache_servers(Some(server_kind)).await?;
         }
         Ok(self.only_servers_by_kind(server_kind))
     }
@@ -420,7 +429,10 @@ mod tests {
         .await?;
 
         let server = sd
-            .server_by_id(&ServerId::from("random-id"), &ServerKind::from("room"))
+            .server_by_id(
+                &ServerId::from("random-id"),
+                Some(&ServerKind::from("room")),
+            )
             .await?;
         assert!(server.is_none());
         assert_eq!(sd.servers_cache.read().unwrap().servers_by_id.len(), 1);
@@ -431,7 +443,7 @@ mod tests {
         }
 
         let server = sd
-            .server_by_id(server_id.as_ref().unwrap(), &ServerKind::from("room"))
+            .server_by_id(server_id.as_ref().unwrap(), Some(&ServerKind::from("room")))
             .await?;
 
         assert!(server.is_some());

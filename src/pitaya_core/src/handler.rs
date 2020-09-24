@@ -1,8 +1,9 @@
-use crate::{context, protos, Route};
+use crate::{context, protos, session, Route};
 use std::{collections::HashMap, future::Future, pin::Pin};
 
 pub type Method = for<'a> fn(
     context::Context,
+    Option<session::Session>,
     &'a protos::Request,
 ) -> Pin<Box<dyn Future<Output = protos::Response> + Send + 'static>>;
 

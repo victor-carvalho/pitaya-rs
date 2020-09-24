@@ -30,6 +30,9 @@ pub enum Error {
 
     #[error("invalid protobuf argument to handler")]
     InvalidProtobufArgument,
+
+    #[error("cluster: {0}")]
+    Cluster(#[from] cluster::Error),
 }
 
 impl ToError for Error {

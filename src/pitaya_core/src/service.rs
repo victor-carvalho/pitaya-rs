@@ -1,13 +1,13 @@
 use crate::{
-    cluster::{self, ServerId},
+    cluster::{self},
     constants,
     context::Context,
     handler::Handlers,
     protos,
-    session::Session,
+    session::{self, Session},
     utils, Route,
 };
-use slog::{debug, error, warn};
+use slog::{debug, error, o, warn};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -24,7 +24,6 @@ pub enum RpcDispatch {
 pub struct Remote {
     logger: slog::Logger,
     discovery: Arc<Mutex<Box<dyn cluster::Discovery>>>,
-    rpc_server: Arc<Box<dyn cluster::RpcServer>>,
     rpc_client: Arc<Box<dyn cluster::RpcClient>>,
     rpc_dispatch: RpcDispatch,
 }
@@ -33,14 +32,12 @@ impl Remote {
     pub fn new(
         logger: slog::Logger,
         discovery: Arc<Mutex<Box<dyn cluster::Discovery>>>,
-        rpc_server: Arc<Box<dyn cluster::RpcServer>>,
         rpc_client: Arc<Box<dyn cluster::RpcClient>>,
         rpc_dispatch: RpcDispatch,
     ) -> Self {
         Self {
             logger,
             discovery,
-            rpc_server,
             rpc_client,
             rpc_dispatch,
         }
@@ -96,8 +93,15 @@ impl Remote {
         // Having the route, we need to find the correct handler and method for it.
         match &self.rpc_dispatch {
             RpcDispatch::Handlers { server, .. } => {
-                Self::call_method_and_respond(self.logger.clone(), server.clone(), ctx, rpc, route)
-                    .await;
+                Self::call_method_and_respond(
+                    self.logger.clone(),
+                    server.clone(),
+                    ctx,
+                    None,
+                    rpc,
+                    route,
+                )
+                .await;
             }
             RpcDispatch::Raw(rpc_handler) => {
                 rpc_handler(ctx, rpc);
@@ -110,28 +114,39 @@ impl Remote {
 
         let req = rpc.request();
 
-        if req.session.is_none() {
-            warn!(self.logger, "received rpc sys without session");
-            if !rpc.respond(utils::build_error_response(
-                constants::CODE_BAD_FORMAT,
-                "was expecting session object",
-            )) {
-                error!(self.logger, "failed to respond to rpc");
-            }
-            return;
-        }
-
         // Get session object
-        let session = Session::new(
-            ServerId::from(&req.frontend_id),
-            req.session.as_ref().unwrap().id,
-            req.session.as_ref().unwrap().uid.clone(),
-        );
+        let session = match Session::new(
+            self.logger.new(o!()),
+            req,
+            self.rpc_client.clone(),
+            self.discovery.clone(),
+        ) {
+            Some(s) => s,
+            None => {
+                warn!(self.logger, "received rpc sys without session");
+                if !rpc.respond(utils::build_error_response(
+                    constants::CODE_BAD_FORMAT,
+                    "was expecting session object",
+                )) {
+                    error!(self.logger, "failed to respond to rpc");
+                }
+                return;
+            }
+        };
+
+        debug!(self.logger, "got RPC with session"; "session" => %session);
 
         match &self.rpc_dispatch {
             RpcDispatch::Handlers { client, .. } => {
-                Self::call_method_and_respond(self.logger.clone(), client.clone(), ctx, rpc, route)
-                    .await;
+                Self::call_method_and_respond(
+                    self.logger.clone(),
+                    client.clone(),
+                    ctx,
+                    Some(session),
+                    rpc,
+                    route,
+                )
+                .await;
             }
             RpcDispatch::Raw(rpc_handler) => {
                 rpc_handler(ctx, rpc);
@@ -143,6 +158,7 @@ impl Remote {
         logger: slog::Logger,
         handlers: Arc<Handlers>,
         ctx: Context,
+        session: Option<Session>,
         rpc: cluster::Rpc,
         route: Route,
     ) {
@@ -156,7 +172,7 @@ impl Remote {
             )
         } else {
             let method = maybe_method.unwrap();
-            method(ctx, rpc.request()).await
+            method(ctx, session, rpc.request()).await
         };
 
         if response.error.is_some() {

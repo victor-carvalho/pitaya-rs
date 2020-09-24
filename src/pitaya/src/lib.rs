@@ -5,7 +5,8 @@ pub mod settings;
 
 pub use error::Error;
 pub use pitaya_core::{
-    cluster, context::Context, handler, message, metrics, protos, state::State, utils, Never,
+    cluster, context::Context, handler, message, metrics, protos, session::Session, state::State,
+    utils, Never,
 };
 use pitaya_core::{
     cluster::server::{ServerId, ServerInfo, ServerKind},
@@ -82,7 +83,6 @@ impl Pitaya {
         let remote = Arc::new(service::Remote::new(
             logger.new(o!()),
             cluster_components.discovery.clone(),
-            cluster_components.rpc_server.clone(),
             cluster_components.rpc_client.clone(),
             rpc_dispatch,
         ));
@@ -108,7 +108,7 @@ impl Pitaya {
         server_kind: &ServerKind,
     ) -> Result<Option<Arc<ServerInfo>>, Error> {
         let mut discovery = self.discovery.lock().await;
-        let server = discovery.server_by_id(server_id, server_kind).await?;
+        let server = discovery.server_by_id(server_id, Some(server_kind)).await?;
         Ok(server)
     }
 
@@ -156,7 +156,7 @@ impl Pitaya {
             self.discovery
                 .lock()
                 .await
-                .server_by_id(server_id, server_kind)
+                .server_by_id(server_id, Some(server_kind))
                 .await?
         };
 
@@ -349,9 +349,6 @@ impl Pitaya {
             let _ = tokio::spawn(async move {
                 match context::Context::new(rpc.request(), container) {
                     Ok(ctx) => {
-                        // Parse route from the request.
-                        debug!(logger, "received rpc"; "req" => ?rpc.request());
-
                         remote.process_rpc(ctx, rpc).await;
                     }
                     Err(e) => {

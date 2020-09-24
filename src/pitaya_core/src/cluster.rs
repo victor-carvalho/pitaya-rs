@@ -27,6 +27,9 @@ pub enum Error {
     #[error("no servers of kind {0:?} found")]
     NoServersFound(server::ServerKind),
 
+    #[error("frontend server id {0:?} not found")]
+    FrontendServerNotFound(server::ServerId),
+
     #[error("corrupt server: {0}")]
     CorruptServer(String),
 
@@ -56,7 +59,7 @@ pub trait Discovery: Send + 'static {
     async fn server_by_id(
         &mut self,
         id: &server::ServerId,
-        kind: &server::ServerKind,
+        kind: Option<&server::ServerKind>,
     ) -> Result<Option<Arc<ServerInfo>>, Error>;
 
     // Discover servers by a specified kind.

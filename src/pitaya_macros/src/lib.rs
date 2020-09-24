@@ -65,18 +65,24 @@ pub fn handlers(item: TokenStream) -> TokenStream {
 
 #[proc_macro_attribute]
 pub fn protobuf_handler(attrs: TokenStream, item: TokenStream) -> TokenStream {
-    common_handler(HandlerKind::Protobuf, attrs, item)
+    common_handler(HandlerSerializer::Protobuf, attrs, item)
 }
 
 #[proc_macro_attribute]
 pub fn json_handler(attrs: TokenStream, item: TokenStream) -> TokenStream {
-    common_handler(HandlerKind::Json, attrs, item)
+    common_handler(HandlerSerializer::Json, attrs, item)
 }
 
 #[derive(Debug, Copy, Clone)]
-enum HandlerKind {
+enum HandlerSerializer {
     Json,
     Protobuf,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum HandlerKind {
+    Client,
+    Server,
 }
 
 struct CompilerError(Span, String);
@@ -115,9 +121,9 @@ fn get_inputs_from_fn(
     Ok(inputs)
 }
 
-fn get_deserialize_code(kind: HandlerKind, ty: &syn::Type) -> proc_macro2::TokenStream {
+fn get_deserialize_code(kind: HandlerSerializer, ty: &syn::Type) -> proc_macro2::TokenStream {
     match kind {
-        HandlerKind::Json => quote! {
+        HandlerSerializer::Json => quote! {
             match ::serde_json::from_slice::<#ty>(&req_data) {
                 ::core::result::Result::Ok(v) => v,
                 ::core::result::Result::Err(_) => {
@@ -128,7 +134,7 @@ fn get_deserialize_code(kind: HandlerKind, ty: &syn::Type) -> proc_macro2::Token
                 },
             }
         },
-        HandlerKind::Protobuf => quote! {
+        HandlerSerializer::Protobuf => quote! {
             {
                 use ::prost::Message;
                 match ::prost::Message::decode(req_data.as_ref()) {
@@ -145,7 +151,11 @@ fn get_deserialize_code(kind: HandlerKind, ty: &syn::Type) -> proc_macro2::Token
     }
 }
 
-fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStream) -> TokenStream {
+fn common_handler(
+    handler_serializer: HandlerSerializer,
+    attrs: TokenStream,
+    item: TokenStream,
+) -> TokenStream {
     let item = parse_macro_input!(item as ItemFn);
     let inputs = match get_inputs_from_fn(&item) {
         Ok(i) => i,
@@ -161,7 +171,7 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
     let parser = Punctuated::<syn::Expr, syn::Token![,]>::parse_separated_nonempty;
     let punct = parser.parse(attrs).expect("failed to parse attributes");
 
-    if punct.is_empty() || punct.len() > 2 {
+    if punct.len() < 2 || punct.len() > 3 {
         return quote! {
             compile_error!("invalid attribute syntax");
         }
@@ -181,8 +191,27 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
         }
     };
 
-    let with_args = if punct.len() > 1 {
-        match &punct[1] {
+    let handler_kind = match &punct[1] {
+        syn::Expr::Path(expr_path) => match expr_path.path.segments.last() {
+            Some(last_seg) if last_seg.ident == "client" => HandlerKind::Client,
+            Some(last_seg) if last_seg.ident == "server" => HandlerKind::Server,
+            _ => {
+                return quote_spanned! {expr_path.span()=>
+                    compile_error!("invalid handler kind");
+                }
+                .into();
+            }
+        },
+        _ => {
+            return quote! {
+                compile_error!("invalid attribute syntax");
+            }
+            .into();
+        }
+    };
+
+    let with_args = if punct.len() > 2 {
+        match &punct[2] {
             syn::Expr::Path(expr_path) => match expr_path.path.segments.last() {
                 Some(last_seg) if last_seg.ident == "with_args" => true,
                 _ => {
@@ -222,7 +251,21 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
         },
         args: {
             let mut p = Punctuated::new();
-            for (ident, _, _) in &inputs {
+
+            if handler_kind == HandlerKind::Client {
+                p.push_value(syn::Expr::Verbatim(
+                    quote! { session.expect("session should not be None") },
+                ));
+                p.push_punct(syn::token::Comma {
+                    spans: [Span::call_site()],
+                });
+            }
+
+            for (ident, _, _) in inputs.iter().skip(if handler_kind == HandlerKind::Client {
+                1
+            } else {
+                0
+            }) {
                 p.push_value(syn::Expr::Verbatim(quote! { #ident }));
                 p.push_punct(syn::token::Comma {
                     spans: [Span::call_site()],
@@ -248,8 +291,12 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
     }
 
     let input_declaration = if with_args {
-        let (input_name, ty, _) = &inputs[0];
-        let deserialize_code = get_deserialize_code(handler_kind, ty);
+        let (input_name, ty, _) = if handler_kind == HandlerKind::Client {
+            &inputs[1]
+        } else {
+            &inputs[0]
+        };
+        let deserialize_code = get_deserialize_code(handler_serializer, ty);
         quote! {
             let #input_name: #ty = #deserialize_code;
         }
@@ -267,6 +314,7 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
 
     let state_declarations = state_declarations
         .iter()
+        .skip(if handler_kind == HandlerKind::Client { 1 } else { 0 })
         .skip(if with_args { 1 } else { 0 })
         .map(|(ident, ty)| {
             quote! {
@@ -284,8 +332,8 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
         })
         .collect::<Vec<_>>();
 
-    let body = match handler_kind {
-        HandlerKind::Json => quote! {
+    let body = match handler_serializer {
+        HandlerSerializer::Json => quote! {
             use ::pitaya_core::ToResponseJson;
             use ::pitaya_core::ToError;
 
@@ -295,10 +343,8 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
             };
 
             let fut = async move {
-                // input declaration
                 #input_declaration
 
-                // state declarations
                 #(#state_declarations)*
 
                 let res = #func_call.await;
@@ -306,7 +352,7 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
             };
             ::std::boxed::Box::pin(fut)
         },
-        HandlerKind::Protobuf => quote! {
+        HandlerSerializer::Protobuf => quote! {
             use ::pitaya_core::ToResponseProto;
             use ::pitaya_core::ToError;
 
@@ -316,10 +362,8 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
             };
 
             let fut = async move {
-                // input declaration
                 #input_declaration
 
-                // state declarations
                 #(#state_declarations)*
 
                 let res = #func_call.await;
@@ -340,6 +384,7 @@ fn common_handler(handler_kind: HandlerKind, attrs: TokenStream, item: TokenStre
 
         fn #generated_handler<'a>(
             ctx: ::pitaya_core::context::Context,
+            session: ::core::option::Option<::pitaya_core::session::Session>,
             req: &'a ::pitaya_core::protos::Request,
         ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ::pitaya_core::protos::Response> + Send + 'static>> {
             // calling original handler

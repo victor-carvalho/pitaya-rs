@@ -15,7 +15,7 @@ struct JsonRes {
 }
 
 #[allow(dead_code)]
-#[json_handler("SuperHandler", with_args)]
+#[json_handler("SuperHandler", server, with_args)]
 async fn my_handler_method(
     input: JsonInput,
     counter: State<'_, std::sync::Arc<i32>>,

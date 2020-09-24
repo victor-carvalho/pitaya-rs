@@ -1,3 +1,4 @@
+use pitaya::Session;
 use serde::{Deserialize, Serialize};
 use slog::{error, o, Drain};
 
@@ -12,8 +13,10 @@ struct Req {
     oi: String,
 }
 
-#[pitaya::json_handler("room", with_args)]
-async fn entry(req: Req) -> Result<JoinResponse, pitaya::Never> {
+#[pitaya::json_handler("room", client, with_args)]
+async fn entry(session: Session, req: Req) -> Result<JoinResponse, pitaya::Never> {
+    println!("received rpc from session: {}", session);
+
     Ok(JoinResponse {
         code: 200,
         result: format!("server: {}", req.oi),
