@@ -121,8 +121,8 @@ impl Remote {
             self.rpc_client.clone(),
             self.discovery.clone(),
         ) {
-            Some(s) => s,
-            None => {
+            Ok(s) => s,
+            Err(session::Error::SessionNotFound) => {
                 warn!(self.logger, "received rpc sys without session");
                 if !rpc.respond(utils::build_error_response(
                     constants::CODE_BAD_FORMAT,
@@ -132,6 +132,17 @@ impl Remote {
                 }
                 return;
             }
+            Err(session::Error::CorruptedSessionData(s)) => {
+                warn!(self.logger, "received rpc with corrupt data"; "data" => %s);
+                if !rpc.respond(utils::build_error_response(
+                    constants::CODE_BAD_FORMAT,
+                    format!("corrupt session data: {}", s),
+                )) {
+                    error!(self.logger, "failed to respond to rpc");
+                }
+                return;
+            }
+            _ => unreachable!(),
         };
 
         debug!(self.logger, "got RPC with session"; "session" => %session);

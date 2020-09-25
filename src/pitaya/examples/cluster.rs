@@ -1,5 +1,5 @@
 use pitaya::Session;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use slog::{error, o, Drain};
 
 #[derive(Serialize)]
@@ -8,18 +8,23 @@ struct JoinResponse {
     result: String,
 }
 
-#[derive(Deserialize)]
-struct Req {
-    oi: String,
-}
-
-#[pitaya::json_handler("room", client, with_args)]
-async fn entry(session: Session, req: Req) -> Result<JoinResponse, pitaya::Never> {
+#[pitaya::json_handler("room", client)]
+async fn entry(mut session: Session) -> Result<JoinResponse, pitaya::Never> {
     println!("received rpc from session: {}", session);
+
+    session.set("MyData", "HELLO WORLD");
+
+    if let Err(e) = session.bind("helroow").await {
+        println!("failed to bind session: {}", e);
+    }
+
+    if let Err(e) = session.push_to_front().await {
+        println!("failed to update session data on front: {}", e);
+    }
 
     Ok(JoinResponse {
         code: 200,
-        result: format!("server: {}", req.oi),
+        result: "ok".to_owned(),
     })
 }
 

@@ -290,6 +290,24 @@ fn common_handler(
         return quote! { compile_error!("json handlers must return Result<T, E>"); }.into();
     }
 
+    let min_num_arguments_needed = {
+        let mut num = 0;
+        if handler_kind == HandlerKind::Client {
+            num += 1;
+        }
+        if with_args {
+            num += 1;
+        }
+        num
+    };
+
+    if inputs.len() < min_num_arguments_needed {
+        return quote_spanned! {method_ident.span()=>
+            compile_error!("number of arguments is incorrect");
+        }
+        .into();
+    }
+
     let input_declaration = if with_args {
         let (input_name, ty, _) = if handler_kind == HandlerKind::Client {
             &inputs[1]

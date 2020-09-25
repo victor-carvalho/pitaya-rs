@@ -1,14 +1,15 @@
 use crate::{
-    cluster::{self, Discovery, RpcClient, ServerId, ServerInfo},
+    cluster::{self, Discovery, RpcClient, ServerId},
     context::Context,
     message, protos, utils,
 };
-use slog::{debug, error};
-use std::sync::Arc;
+use slog::{debug, error, warn};
+use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
 const BIND_ROUTE: &str = "sys.bindsession";
+const SESSION_PUSH_ROUTE: &str = "sys.pushsession";
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -17,6 +18,15 @@ pub enum Error {
 
     #[error("{0}")]
     Cluster(#[from] cluster::Error),
+
+    #[error("is a frontend session")]
+    FrontendSession,
+
+    #[error("session was not found on RPC")]
+    SessionNotFound,
+
+    #[error("session data is corrupted: {0}")]
+    CorruptedSessionData(String),
 }
 
 // Session represents the state of a client connection in a frontend server.
@@ -28,6 +38,10 @@ pub struct Session {
     pub frontend_id: ServerId,
     // The id of the session on the frontend server.
     pub frontend_session_id: i64,
+    // Whether this is a frontend session or not.
+    pub is_frontend: bool,
+    // Json information that can be propagated with the session along RPCs.
+    pub data: HashMap<String, serde_json::Value>,
 
     discovery: Arc<Mutex<Box<dyn Discovery>>>,
     rpc_client: Arc<Box<dyn RpcClient>>,
@@ -38,8 +52,11 @@ impl std::fmt::Display for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "frontend_id={} frontend_session_id={} uid={}",
-            self.frontend_id.0, self.frontend_session_id, self.uid
+            "frontend_id={} frontend_session_id={} uid={} data={}",
+            self.frontend_id.0,
+            self.frontend_session_id,
+            self.uid,
+            self.data_encoded()
         )
     }
 }
@@ -50,35 +67,67 @@ impl Session {
         req: &protos::Request,
         rpc_client: Arc<Box<dyn RpcClient>>,
         discovery: Arc<Mutex<Box<dyn Discovery>>>,
-    ) -> Option<Self> {
+    ) -> Result<Self, Error> {
         if let Some(s) = req.session.as_ref() {
-            Some(Self {
+            let data = serde_json::from_slice(&s.data).map_err(|_| {
+                Error::CorruptedSessionData(String::from_utf8_lossy(&s.data).to_string())
+            })?;
+
+            Ok(Self {
                 logger,
                 uid: s.uid.clone(),
                 frontend_id: ServerId::from(&req.frontend_id),
                 frontend_session_id: s.id.clone(),
                 rpc_client,
                 discovery,
+                is_frontend: false,
+                data,
             })
         } else {
-            None
+            Err(Error::SessionNotFound)
         }
+    }
+
+    pub async fn push_to_front(&self) -> Result<(), Error> {
+        if self.is_frontend {
+            return Err(Error::FrontendSession);
+        }
+        self.send_request_to_frontend(SESSION_PUSH_ROUTE, true)
+            .await
     }
 
     pub async fn bind(&mut self, uid: impl ToString) -> Result<(), Error> {
         if !self.uid.is_empty() {
             return Err(Error::AlreadyBound);
         }
+        self.uid = uid.to_string();
+        self.send_request_to_frontend(BIND_ROUTE, false).await
+    }
 
-        // TODO(lhahn): whenever we add support for frontend servers,
-        // we need to check here when binding the session if the server is front or not.
-        let buf = utils::encode_proto(&protos::Session {
+    pub fn set(&mut self, key: impl ToString, value: impl serde::Serialize) {
+        let key = key.to_string();
+        if let Ok(json_value) = serde_json::to_value(&value) {
+            self.data.insert(key, json_value);
+        } else {
+            warn!(
+                self.logger,
+                "cannot set value on session that cannot be converted to json";
+                "key" => %key,
+            );
+        }
+    }
+
+    async fn send_request_to_frontend(&self, route: &str, include_data: bool) -> Result<(), Error> {
+        let session_data = protos::Session {
             id: self.frontend_session_id,
-            uid: uid.to_string(),
-            ..Default::default()
-        });
+            uid: self.uid.to_string(),
+            data: if include_data {
+                serde_json::to_vec(&self.data).expect("serialization should not fail")
+            } else {
+                vec![]
+            },
+        };
 
-        // First we need to find the frontend server from where this session belongs to.
         let frontend_server = match self
             .discovery
             .lock()
@@ -108,8 +157,8 @@ impl Session {
                 message::Message {
                     kind: message::Kind::Request,
                     id: 0,
-                    route: BIND_ROUTE.to_owned(),
-                    data: buf,
+                    route: route.to_owned(),
+                    data: utils::encode_proto(&session_data),
                     compressed: false,
                     err: false,
                 },
@@ -117,11 +166,16 @@ impl Session {
             )
             .await?;
 
-        debug!(self.logger, "session bind complete"; "res" => ?res);
-
-        // We only set the uid once we succeed with the bind rpc.
-        self.uid = uid.to_string();
+        if let Some(error) = res.error {
+            error!(self.logger, "failed to send request to front"; "code" => error.code, "msg" => error.msg, "route" => route);
+        } else {
+            debug!(self.logger, "request to front complete"; "route" => route);
+        }
 
         Ok(())
+    }
+
+    fn data_encoded(&self) -> String {
+        serde_json::to_string(&self.data).expect("encoding should not fail")
     }
 }
