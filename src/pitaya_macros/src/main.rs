@@ -1,5 +1,3 @@
-#![feature(decl_macro)]
-
 use pitaya_core::state::State;
 use pitaya_macros::{handlers, json_handler};
 use serde::{Deserialize, Serialize};

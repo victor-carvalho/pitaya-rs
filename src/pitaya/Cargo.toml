@@ -8,7 +8,6 @@ edition = "2018"
 name = "pitaya"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
-proc-macro = true
 
 [[bench]]
 name = "self_rpc_call"
