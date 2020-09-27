@@ -74,19 +74,31 @@ impl Into<String> for Route {
 }
 
 impl Route {
-    pub fn server_kind(&self) -> &str {
+    pub fn server_kind(&self) -> Option<&str> {
         let comps: Vec<&str> = self.route_string.split('.').collect();
-        comps[0]
+        if comps.len() == 2 {
+            None
+        } else {
+            Some(comps[0])
+        }
     }
 
     pub fn handler(&self) -> &str {
         let comps: Vec<&str> = self.route_string.split('.').collect();
-        comps[1]
+        if comps.len() == 2 {
+            comps[0]
+        } else {
+            comps[1]
+        }
     }
 
     pub fn method(&self) -> &str {
         let comps: Vec<&str> = self.route_string.split('.').collect();
-        comps[2]
+        if comps.len() == 2 {
+            comps[1]
+        } else {
+            comps[2]
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -95,19 +107,30 @@ impl Route {
 
     pub fn try_from_str(route_string: String) -> Option<Route> {
         let comps: Vec<&str> = route_string.split('.').collect();
-        if comps.len() != 3 {
-            return None;
+
+        if comps.len() == 2 {
+            let handler = comps[0];
+            let method = comps[1];
+            if handler.is_empty() || method.is_empty() {
+                return None;
+            }
+
+            return Some(Route { route_string });
         }
 
-        let server_kind = comps[0];
-        let handler = comps[1];
-        let method = comps[2];
+        if comps.len() == 3 {
+            let server_kind = comps[0];
+            let handler = comps[1];
+            let method = comps[2];
 
-        if server_kind.is_empty() || handler.is_empty() || method.is_empty() {
-            return None;
+            if server_kind.is_empty() || handler.is_empty() || method.is_empty() {
+                return None;
+            }
+
+            return Some(Route { route_string });
         }
 
-        Some(Route { route_string })
+        None
     }
 }
 
@@ -173,11 +196,21 @@ mod tests {
 
     #[test]
     fn route_works() {
-        let route_str = "server-kind.myhandler.mymethod";
-        let route = Route::try_from_str(route_str.to_owned()).expect("should not fail");
-        assert_eq!(route.as_str(), route_str);
-        assert_eq!(route.server_kind(), "server-kind");
-        assert_eq!(route.handler(), "myhandler");
-        assert_eq!(route.method(), "mymethod");
+        {
+            let route_str = "server-kind.myhandler.mymethod";
+            let route = Route::try_from_str(route_str.to_owned()).expect("should not fail");
+            assert_eq!(route.as_str(), route_str);
+            assert_eq!(route.server_kind(), Some("server-kind"));
+            assert_eq!(route.handler(), "myhandler");
+            assert_eq!(route.method(), "mymethod");
+        }
+        {
+            let route_str = "myhandler.mymethod";
+            let route = Route::try_from_str(route_str.to_owned()).expect("should not fail");
+            assert_eq!(route.as_str(), route_str);
+            assert_eq!(route.server_kind(), None);
+            assert_eq!(route.handler(), "myhandler");
+            assert_eq!(route.method(), "mymethod");
+        }
     }
 }

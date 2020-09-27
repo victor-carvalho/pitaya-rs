@@ -3,7 +3,6 @@ use pitaya_core::Route;
 use prost::Message;
 use slog::{error, o, Drain};
 use std::{
-    borrow::Cow,
     ffi::{c_void, CStr, CString},
     mem,
     os::raw::c_char,
@@ -224,6 +223,11 @@ impl std::convert::From<context::Context> for PitayaContext {
     }
 }
 
+//=========================================================================
+//
+// Main API
+//
+//=========================================================================
 pub type PitayaClusterNotificationCallback =
     extern "C" fn(*mut c_void, PitayaClusterNotification, *mut PitayaServerInfo);
 
@@ -433,7 +437,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
             .with_env_prefix(&env_prefix.to_string_lossy())
             .with_config_file(&config_file.to_string_lossy())
             .with_logger(root_logger)
-            .with_rpc_handler(Box::new(move |ctx, rpc| {
+            .with_rpc_handler(Box::new(move |ctx, _session, rpc| {
                 let request_buffer = utils::encode_proto(rpc.request());
                 let rpc = Box::into_raw(Box::new(PitayaRpc {
                     request: request_buffer,
@@ -538,18 +542,17 @@ pub extern "C" fn pitaya_send_rpc(
 
     let user_data = PitayaUserData(user_data);
     let server_id = if server_id.is_null() {
-        Cow::default()
+        String::new()
     } else {
-        unsafe { CStr::from_ptr(server_id).to_string_lossy() }
+        unsafe { CStr::from_ptr(server_id).to_string_lossy().to_string() }
     };
 
     let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
     let logger = p.pitaya_server.logger();
 
-    let route_str = unsafe { CStr::from_ptr(route_str).to_string_lossy() };
+    let route_str = unsafe { CStr::from_ptr(route_str).to_string_lossy().to_string() };
     let request_buffer = unsafe { Box::from_raw(request_buffer) };
 
-    let route_str = route_str.to_string();
     let mut pitaya_server = p.pitaya_server.clone();
     p.runtime.spawn(async move {
         let route = match Route::try_from_str(route_str.to_string()) {
@@ -565,12 +568,14 @@ pub extern "C" fn pitaya_send_rpc(
             }
         };
 
+        let server_kind = route.server_kind().map(|k| ServerKind::from(k));
+
         let result = if server_id.len() > 0 {
             pitaya_server
                 .send_rpc_to_server(
                     context::Context::empty(),
-                    &ServerId::from(server_id.as_ref()),
-                    &ServerKind::from(route.server_kind()),
+                    &ServerId::from(&server_id),
+                    server_kind.as_ref(),
                     &route_str,
                     request_buffer.data.clone(),
                 )
@@ -588,7 +593,7 @@ pub extern "C" fn pitaya_send_rpc(
         let res = match result {
             Ok(r) => r,
             Err(e) => {
-                error!(logger, "RPC failed");
+                error!(logger, "RPC failed"; "error" => %e);
                 let mut err = Box::new(PitayaError::new("PIT-500", &format!("rpc error: {}", e)));
                 callback(user_data.0, &mut *err as *mut PitayaError, null_mut());
                 return;

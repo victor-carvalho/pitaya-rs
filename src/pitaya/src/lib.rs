@@ -145,26 +145,25 @@ impl Pitaya {
         &mut self,
         ctx: context::Context,
         server_id: &ServerId,
-        server_kind: &ServerKind,
+        server_kind: Option<&ServerKind>,
         route_str: &str,
         data: Vec<u8>,
     ) -> Result<protos::Response, Error> {
-        debug!(self.logger, "sending rpc");
+        debug!(self.logger, "sending rpc"; "server_id" => %server_id.0);
 
         let server_info = {
             debug!(self.logger, "getting servers");
             self.discovery
                 .lock()
                 .await
-                .server_by_id(server_id, Some(server_kind))
+                .server_by_id(server_id, server_kind)
                 .await?
         };
 
         if let Some(server_info) = server_info {
             let msg = message::Message {
                 kind: message::Kind::Request,
-                // TODO(lhahn): what is the id here?
-                id: 1,
+                id: 0,
                 route: route_str.to_string(),
                 data,
                 compressed: false,
@@ -182,7 +181,7 @@ impl Pitaya {
                 })?;
             Ok(res)
         } else {
-            Err(Error::NoServersFound(server_kind.clone()))
+            Err(Error::ServerIdNotFound(server_id.0.clone()))
         }
     }
 
@@ -195,7 +194,10 @@ impl Pitaya {
         debug!(self.logger, "sending rpc");
 
         let route = Route::try_from_str(route_str.to_string()).ok_or(Error::InvalidRoute)?;
-        let server_kind = ServerKind::from(route.server_kind());
+        let server_kind = route
+            .server_kind()
+            .map(|k| ServerKind::from(k))
+            .ok_or(Error::NoServerKindOnRoute(route_str.to_string()))?;
 
         debug!(self.logger, "getting servers");
         let servers = self
@@ -211,9 +213,11 @@ impl Pitaya {
 
             let msg = message::Message {
                 kind: message::Kind::Request,
+                id: 0,
                 route: route_str.to_string(),
                 data,
-                ..Default::default()
+                compressed: false,
+                err: false,
             };
 
             let res = self
@@ -404,7 +408,9 @@ pub struct PitayaBuilder<'a> {
     env_prefix: Option<&'a str>,
     config_file: Option<&'a str>,
     base_settings: settings::Settings,
-    rpc_handler: Option<Box<dyn Fn(context::Context, cluster::Rpc) + Send + Sync + 'static>>,
+    rpc_handler: Option<
+        Box<dyn Fn(context::Context, Option<Session>, cluster::Rpc) + Send + Sync + 'static>,
+    >,
     client_handlers: handler::Handlers,
     server_handlers: handler::Handlers,
     container: state::Container,
@@ -454,7 +460,9 @@ impl<'a> PitayaBuilder<'a> {
 
     pub fn with_rpc_handler(
         mut self,
-        handler: Box<dyn Fn(context::Context, cluster::Rpc) + Send + Sync + 'static>,
+        handler: Box<
+            dyn Fn(context::Context, Option<Session>, cluster::Rpc) + Send + Sync + 'static,
+        >,
     ) -> Self {
         self.rpc_handler.replace(handler);
         self

@@ -248,7 +248,7 @@ mod tests {
 
     #[tokio::test]
     async fn nats_request_timeout() -> Result<(), Error> {
-        let mut client = NatsRpcClient::new(
+        let client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
             Arc::new(settings::Nats {
                 request_timeout: Duration::from_millis(300),

@@ -44,7 +44,7 @@ pub struct RpcMsg {
     pub msg: std::string::String,
 }
 
-#[pitaya::protobuf_handler("random")]
+#[pitaya::protobuf_handler("random", server)]
 async fn test_method() -> Result<RpcMsg, pitaya::Never> {
     Ok(RpcMsg {
         route: String::from(""),
@@ -61,7 +61,6 @@ async fn main() {
         .with_env_prefix("MY_ENV")
         .with_config_file("examples/config/production.yaml")
         .with_logger(root_logger)
-        .with_client_handlers(pitaya::handlers![test_method])
         .with_server_handlers(pitaya::handlers![test_method])
         .with_cluster_subscriber({
             let logger = logger.clone();

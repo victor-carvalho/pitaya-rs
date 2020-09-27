@@ -3,13 +3,11 @@ using Google.Protobuf;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
 using NPitaya.Metrics;
 using NPitaya.Models;
 using NPitaya.Serializer;
 using NPitaya.Protos;
-using NPitaya.Utils;
 using static NPitaya.Utils.Utils;
 
 // TODO profiling
@@ -17,9 +15,10 @@ using static NPitaya.Utils.Utils;
 // TODO support to sync methods
 namespace NPitaya
 {
+    // Allows making RPC calls to other Pitaya servers.
     public partial class PitayaCluster
     {
-        private static ISerializer _serializer = new ProtobufSerializer();
+        private static ISerializer _serializer = new JSONSerializer();
         public delegate string RemoteNameFunc(string methodName);
         private delegate void OnSignalFunc();
         private static readonly Dictionary<string, RemoteMethod> RemotesDict = new Dictionary<string, RemoteMethod>();
@@ -28,6 +27,7 @@ namespace NPitaya
         private static HandleRpcCallbackFunc handleRpcCallback;
         private static ClusterNotificationCallbackFunc clusterNotificationCallback;
         private static LogFunction logFunctionCallback;
+        private static RpcClient _rpcClient;
 
         private static Action _onSignalEvent;
 
@@ -89,7 +89,7 @@ namespace NPitaya
                 var req = new Protos.Request();
                 req.MergeFrom(new CodedInputStream(data));
 
-                DispatchRpc(rpc, req);
+                DispatchRpc(_rpcClient, rpc, req);
             }
             catch (Exception e)
             {
@@ -129,6 +129,8 @@ namespace NPitaya
                 pitaya_error_drop(err);
                 throw new PitayaException($"Initialization failed: code={pitayaError.Code} msg={pitayaError.Message}");
             }
+
+            _rpcClient = new RpcClient(pitaya);
         }
 
         static void LogFunctionCallback(IntPtr ctx, IntPtr msg)
@@ -257,21 +259,6 @@ namespace NPitaya
             });
         }
 
-        private static void PushCallback(IntPtr userData, IntPtr err)
-        {
-            var handle = GCHandle.FromIntPtr(userData);
-            var t = (TaskCompletionSource<bool>)handle.Target;
-
-            if (err != IntPtr.Zero)
-            {
-                var pe = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
-                t.SetException(new Exception($"Push failed: code={pe.Code}, message={pe.Message}"));
-                return;
-            }
-
-            t.SetResult(true);
-        }
-
         public static Task SendPushToUser(
             string frontendId,
             string serverKind,
@@ -279,119 +266,17 @@ namespace NPitaya
             string uid,
             object pushMsg)
         {
-            return Task.Run(() =>
-            {
-                var t = new TaskCompletionSource<bool>();
-                var del = new SendPushCallback(PushCallback);
-                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
-                var push = new Push
-                {
-                    Route = route,
-                    Uid = uid,
-                    Data = ByteString.CopyFrom(SerializerUtils.SerializeOrRaw(pushMsg, _serializer))
-                };
-
-                unsafe
-                {
-                    var data = push.ToByteArray();
-                    fixed (byte* p = data)
-                    {
-                        IntPtr pushBuffer = pitaya_buffer_new((IntPtr)p, data.Length);
-                        pitaya_send_push_to_user(pitaya, frontendId, serverKind, pushBuffer, del, GCHandle.ToIntPtr(handle));
-                    }
-                }
-
-                return t.Task;
-            });
-        }
-
-        private static void KickCallback(IntPtr userData, IntPtr err, IntPtr kickAnswerBuf)
-        {
-            var handle = GCHandle.FromIntPtr(userData);
-            var t = (TaskCompletionSource<bool>)handle.Target;
-
-            if (err != IntPtr.Zero)
-            {
-                var pe = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
-                t.SetException(new Exception($"Kick failed: code={pe.Code} message={pe.Message}"));
-                return;
-            }
-
-            Int32 len;
-            IntPtr resData = pitaya_buffer_data(kickAnswerBuf, out len);
-
-            var kickAnswer = new KickAnswer();
-            kickAnswer.MergeFrom(new CodedInputStream(GetDataFromRawPointer(resData, len)));
-
-            if (!kickAnswer.Kicked)
-            {
-                t.SetException(new Exception($"Kick failed: received kicked=false from server"));
-                return;
-            }
-
-            t.SetResult(true);
+            return _rpcClient.SendPushToUser(frontendId, serverKind, route, uid, pushMsg);
         }
 
         public static Task SendKickToUser(string frontendId, string serverKind, KickMsg kick)
         {
-            return Task.Run(() =>
-            {
-                var t = new TaskCompletionSource<bool>();
-                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
-                var del = new SendKickCallback(KickCallback);
-
-                unsafe
-                {
-                    var data = kick.ToByteArray();
-                    fixed (byte* p = data)
-                    {
-                        IntPtr kickBuffer = pitaya_buffer_new((IntPtr)p, data.Length);
-                        pitaya_send_kick(pitaya, frontendId, serverKind, kickBuffer, del, GCHandle.ToIntPtr(handle));
-                    }
-                }
-
-                return t.Task;
-            });
-        }
-
-        private static void RpcCallback<T>(IntPtr userData, IntPtr err, IntPtr responseBuf)
-        {
-            var handle = GCHandle.FromIntPtr(userData);
-            var t = (TaskCompletionSource<T>)handle.Target;
-
-            if (err != IntPtr.Zero)
-            {
-                var pitayaError = new PitayaError(pitaya_error_code(err), pitaya_error_message(err));
-                t.SetException(new PitayaException($"RPC call failed: ({pitayaError.Code}: {pitayaError.Message})"));
-                return;
-            }
-
-            Int32 len;
-            IntPtr resData = pitaya_buffer_data(responseBuf, out len);
-            T response = GetProtoMessageFromBuffer<T>(GetDataFromRawPointer(resData, len));
-            t.SetResult(response);
+            return _rpcClient.SendKickToUser(frontendId, serverKind, kick);
         }
 
         public static Task<T> Rpc<T>(string serverId, Route route, object msg)
         {
-            return Task.Run(() =>
-            {
-                var callback = new SendRpcCallback(RpcCallback<T>);
-                var t = new TaskCompletionSource<T>();
-                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
-
-                unsafe
-                {
-                    var data = SerializerUtils.SerializeOrRaw(msg, _serializer);
-                    fixed (byte* p = data)
-                    {
-                        IntPtr request = pitaya_buffer_new((IntPtr)p, data.Length);
-                        pitaya_send_rpc(pitaya, serverId, route.ToString(), request, callback, GCHandle.ToIntPtr(handle));
-                    }
-                }
-
-                return t.Task;
-            });
+            return _rpcClient.Rpc<T>(serverId, route, msg);
         }
 
         public static Task<T> Rpc<T>(Route route, object msg)

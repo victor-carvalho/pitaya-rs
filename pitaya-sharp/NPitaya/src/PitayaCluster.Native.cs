@@ -9,16 +9,16 @@ namespace NPitaya
         private delegate void ServerAddedOrRemoved(int serverAdded, IntPtr server, IntPtr user);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void SendRpcCallback(IntPtr userData, IntPtr err, IntPtr response);
+        internal delegate void SendRpcCallback(IntPtr userData, IntPtr err, IntPtr response);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void ServerByIdCallback(IntPtr userData, IntPtr server);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void SendKickCallback(IntPtr userData, IntPtr err, IntPtr kickAnswerBuffer);
+        internal delegate void SendKickCallback(IntPtr userData, IntPtr err, IntPtr kickAnswerBuffer);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void SendPushCallback(IntPtr userData, IntPtr err);
+        internal delegate void SendPushCallback(IntPtr userData, IntPtr err);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void LogFunction(IntPtr context, IntPtr msg);
@@ -28,6 +28,8 @@ namespace NPitaya
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void ClusterNotificationCallbackFunc(IntPtr userData, NotificationType notificationType, IntPtr data);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void FinishCallback(IntPtr userData, IntPtr errorMsg);
 
         private const string LibName = "libpitaya";
 
@@ -49,7 +51,7 @@ namespace NPitaya
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern void pitaya_shutdown(IntPtr pitaya);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr pitaya_send_rpc(
+        internal static extern IntPtr pitaya_send_rpc(
             IntPtr pitaya,
             string serverId,
             string route,
@@ -63,21 +65,21 @@ namespace NPitaya
         // Error
         //
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr pitaya_error_drop(IntPtr error);
+        internal static extern IntPtr pitaya_error_drop(IntPtr error);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr pitaya_error_code(IntPtr error);
+        internal static extern IntPtr pitaya_error_code(IntPtr error);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr pitaya_error_message(IntPtr error);
+        internal static extern IntPtr pitaya_error_message(IntPtr error);
 
         //
         // Buffer
         //
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr pitaya_buffer_new(IntPtr data, Int32 len);
+        internal static extern IntPtr pitaya_buffer_new(IntPtr data, Int32 len);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr pitaya_buffer_drop(IntPtr buf);
+        internal static extern IntPtr pitaya_buffer_drop(IntPtr buf);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr pitaya_buffer_data(IntPtr buf, out Int32 len);
+        internal static extern IntPtr pitaya_buffer_data(IntPtr buf, out Int32 len);
 
         //
         // Server
@@ -119,7 +121,7 @@ namespace NPitaya
         // Kick
         //
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr pitaya_send_kick(
+        internal static extern IntPtr pitaya_send_kick(
             IntPtr pitaya,
             string serverId,
             string serverKind,
@@ -131,13 +133,42 @@ namespace NPitaya
         // Push
         //
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr pitaya_send_push_to_user(
+        internal static extern IntPtr pitaya_send_push_to_user(
             IntPtr pitaya,
             string serverId,
             string serverKind,
             IntPtr pushBuffer,
             SendPushCallback callback,
             IntPtr userData);
-    }
 
+        //
+        // Session
+        //
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pitaya_session_drop(IntPtr session);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pitaya_session_push(
+            IntPtr pitaya,
+            IntPtr session,
+            string route,
+            IntPtr buffer,
+            FinishCallback callback,
+            IntPtr userData);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pitaya_session_bind(
+            IntPtr pitaya,
+            IntPtr session,
+            string uid,
+            FinishCallback callback,
+            IntPtr userData);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pitaya_session_update_in_front(
+            IntPtr pitaya,
+            IntPtr session,
+            FinishCallback callback,
+            IntPtr userData);
+    }
 }

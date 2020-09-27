@@ -1,0 +1,4 @@
+auth:
+  enabled: false
+clusterAuth:
+  enabled: false

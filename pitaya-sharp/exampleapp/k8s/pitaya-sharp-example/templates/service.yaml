@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pitaya-sharp-example.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "pitaya-sharp-example.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.service.annotations }}
+      {{- toYaml . | nindent 4 }}
+    {{- end}}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    {{- with .Values.service.ports }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
+  selector:
+    {{- include "pitaya-sharp-example.selectorLabels" . | nindent 4 }}

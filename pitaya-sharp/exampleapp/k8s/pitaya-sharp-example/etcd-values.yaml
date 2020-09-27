@@ -1,0 +1,9 @@
+auth:
+  rbac:
+    enabled: false
+  client:
+    enableAuthentication: false
+readinessProble:
+  enabled: false
+securityContext:
+  enabled: false

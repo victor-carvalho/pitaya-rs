@@ -46,8 +46,11 @@ namespace NPitaya
 
         ~Server()
         {
-            PitayaCluster.pitaya_server_drop(serverHandle);
-            serverHandle = IntPtr.Zero;
+            if (serverHandle != IntPtr.Zero)
+            {
+                PitayaCluster.pitaya_server_drop(serverHandle);
+                serverHandle = IntPtr.Zero;
+            }
         }
     }
 
@@ -101,6 +104,7 @@ namespace NPitaya
             {
                 return new Route(res[0], res[1]);
             }
+            Console.WriteLine($"LEN IS {r.Length}");
             throw new Exception($"invalid route: {r}");
         }
 

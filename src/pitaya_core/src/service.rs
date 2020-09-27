@@ -16,7 +16,7 @@ pub enum RpcDispatch {
         client: Arc<Handlers>,
         server: Arc<Handlers>,
     },
-    Raw(Box<dyn Fn(Context, cluster::Rpc) + Send + Sync + 'static>),
+    Raw(Box<dyn Fn(Context, Option<Session>, cluster::Rpc) + Send + Sync + 'static>),
 }
 
 // Remote is a service that is capable of handling RPC messages from other pitaya servers
@@ -104,7 +104,7 @@ impl Remote {
                 .await;
             }
             RpcDispatch::Raw(rpc_handler) => {
-                rpc_handler(ctx, rpc);
+                rpc_handler(ctx, None, rpc);
             }
         }
     }
@@ -160,7 +160,7 @@ impl Remote {
                 .await;
             }
             RpcDispatch::Raw(rpc_handler) => {
-                rpc_handler(ctx, rpc);
+                rpc_handler(ctx, Some(session), rpc);
             }
         }
     }

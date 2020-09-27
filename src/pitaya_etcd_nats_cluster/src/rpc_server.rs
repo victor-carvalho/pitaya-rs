@@ -256,7 +256,7 @@ mod tests {
             hostname: "".to_owned(),
         });
 
-        let mut rpc_server = NatsRpcServer::new(
+        let rpc_server = NatsRpcServer::new(
             test_helpers::get_root_logger(),
             sv.clone(),
             Arc::new(Default::default()),
@@ -284,7 +284,7 @@ mod tests {
         };
 
         {
-            let mut client = NatsRpcClient::new(
+            let client = NatsRpcClient::new(
                 test_helpers::get_root_logger(),
                 Arc::new(Default::default()),
                 sv.clone(),

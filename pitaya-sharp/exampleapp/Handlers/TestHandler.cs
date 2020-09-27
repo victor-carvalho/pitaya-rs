@@ -10,11 +10,20 @@ namespace exampleapp.Handlers
 {
     class TestHandler : BaseHandler
     {
-        public async Task<MyResponse> Entry(PitayaSession pitayaSession, RPCMsg msg)
+        public async Task<MyResponse> Entry(PitayaSession session, RPCMsg msg)
         {
+            try
+            {
+                await session.Bind("CSHARP_UID");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"session bind error: {e.Message}");
+            }
+
             var response = new MyResponse
             {
-                Msg = $"hello from csharp handler!!! :) {Guid.NewGuid().ToString()}, route={msg.Route} msg={msg.Msg}",
+                Msg = $"csharp handler [uid={session.Uid}] :) route={msg.Route} msg={msg.Msg}",
                 Code = 200
             };
             return response;

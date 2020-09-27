@@ -13,7 +13,7 @@ namespace NPitaya
 {
     public partial class PitayaCluster
     {
-        static async Task<Response> HandleRpc(Protos.Request req, RPCType type)
+        static async Task<Response> HandleRpc(RpcClient rpcClient, Protos.Request req, RPCType type)
         {
             byte[] data = req.Msg.Data.ToByteArray();
             Route route = Route.FromString(req.Msg.Route);
@@ -26,7 +26,7 @@ namespace NPitaya
             RemoteMethod handler;
             if (type == RPCType.Sys)
             {
-                s = new Models.PitayaSession(req.Session, req.FrontendID);
+                s = new Models.PitayaSession(req.Session, rpcClient, req.FrontendID);
                 if (!HandlersDict.ContainsKey(handlerName))
                 {
                     response = GetErrorResponse("PIT-404",
@@ -82,23 +82,13 @@ namespace NPitaya
             return response;
         }
 
-        static void DispatchRpc(IntPtr rpc, Protos.Request req)
+        static void DispatchRpc(RpcClient rpcClient, IntPtr rpc, Protos.Request req)
         {
             Task.Run(async () => {
                 var res = new Protos.Response();
                 try
                 {
-                    switch (req.Type)
-                    {
-                        case RPCType.User:
-                            res = await HandleRpc(req, RPCType.User);
-                            break;
-                        case RPCType.Sys:
-                            res = await HandleRpc(req, RPCType.Sys);
-                            break;
-                        default:
-                            throw new Exception($"invalid rpc type, argument:{req.Type}");
-                    }
+                    res = await HandleRpc(rpcClient, req, req.Type);
                 }
                 catch (Exception e)
                 {

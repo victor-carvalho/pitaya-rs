@@ -10,15 +10,17 @@ namespace NPitaya.Models
 {
     public class PitayaSession
     {
-        private Int64 _id;
-        private string _frontendId;
-        private Dictionary<string, object> _data;
-        private string _rawData;
+        Int64 _id;
+        string _frontendId;
+        Dictionary<string, object> _data;
+        string _rawData;
         public string RawData => _rawData;
         public string Uid { get; private set; }
+        RpcClient _rpcClient;
 
-        public PitayaSession(Protos.Session sessionProto)
+        internal PitayaSession(Protos.Session sessionProto, RpcClient rpcClient)
         {
+            _rpcClient = rpcClient;
             _id = sessionProto.Id;
             Uid = sessionProto.Uid;
             _rawData = sessionProto.Data.ToStringUtf8();
@@ -26,7 +28,8 @@ namespace NPitaya.Models
                 _data = Json.DeserializeObject<Dictionary<string, object>>(_rawData);
         }
 
-        public PitayaSession(Protos.Session sessionProto, string frontendId):this(sessionProto)
+        internal PitayaSession(Protos.Session sessionProto, RpcClient rpcClient, string frontendId)
+            : this(sessionProto, rpcClient)
         {
             _frontendId = frontendId;
         }
@@ -95,12 +98,41 @@ namespace NPitaya.Models
             return Task.CompletedTask;
         }
 
-        private Task BindInFrontend()
+        public Task Push(object pushMsg, string route)
+        {
+            return _rpcClient.SendPushToUser(_frontendId, "", route, Uid, pushMsg);
+        }
+        public Task Push(object pushMsg, string svType, string route)
+        {
+            return _rpcClient.SendPushToUser("", svType, route, Uid, pushMsg);
+        }
+
+        public Task Push(object pushMsg, string svType, string svId, string route)
+        {
+            return _rpcClient.SendPushToUser(svId, svType, route, Uid, pushMsg);
+        }
+
+        public Task Kick()
+        {
+            return _rpcClient.SendKickToUser(_frontendId, "", new KickMsg
+            {
+                UserId = Uid
+            });
+        }
+        public Task Kick(string svType)
+        {
+            return _rpcClient.SendKickToUser("", svType, new KickMsg
+            {
+                UserId = Uid
+            });
+        }
+
+        Task BindInFrontend()
         {
             return SendRequestToFront(Routes.SessionBindRoute, false);
         }
 
-        private Task SendRequestToFront(string route, bool includeData)
+        Task SendRequestToFront(string route, bool includeData)
         {
             var sessionProto = new Protos.Session
             {
@@ -111,37 +143,7 @@ namespace NPitaya.Models
             {
                 sessionProto.Data = ByteString.CopyFromUtf8(_rawData);
             }
-            Console.WriteLine($"sending {sessionProto}");
-            return PitayaCluster.Rpc<Response>(_frontendId, Route.FromString(route), sessionProto.ToByteArray());
-        }
-
-        public Task Push(object pushMsg, string route)
-        {
-            return PitayaCluster.SendPushToUser(_frontendId, "", route, Uid, pushMsg);
-        }
-        public Task Push(object pushMsg, string svType, string route)
-        {
-            return PitayaCluster.SendPushToUser("", svType, route, Uid, pushMsg);
-        }
-
-        public Task Push(object pushMsg, string svType, string svId, string route)
-        {
-            return PitayaCluster.SendPushToUser(svId, svType, route, Uid, pushMsg);
-        }
-
-        public Task Kick()
-        {
-            return PitayaCluster.SendKickToUser(_frontendId, "", new KickMsg
-            {
-                UserId = Uid
-            });
-        }
-        public Task Kick(string svType)
-        {
-            return PitayaCluster.SendKickToUser("", svType, new KickMsg
-            {
-                UserId = Uid
-            });
+            return _rpcClient.Rpc<Response>(_frontendId, Route.FromString(route), sessionProto.ToByteArray());
         }
     }
 }

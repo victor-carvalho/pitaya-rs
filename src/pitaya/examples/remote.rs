@@ -1,4 +1,3 @@
-#![feature(future_readiness_fns)]
 use pitaya::{Context, State};
 use slog::{error, info, o, Drain};
 use std::sync::{Arc, Mutex};
@@ -65,7 +64,7 @@ struct Counter {
     value: Arc<Mutex<i32>>,
 }
 
-#[pitaya::protobuf_handler("hello", with_args)]
+#[pitaya::protobuf_handler("hello", server, with_args)]
 async fn hello_method(
     rpc_msg: RpcMsg,
     counter: State<'_, Counter>,
@@ -89,7 +88,7 @@ async fn main() {
         .with_env_prefix("MY_ENV")
         .with_config_file("examples/config/production.yaml")
         .with_logger(root_logger)
-        .with_handlers(pitaya::handlers![hello_method])
+        .with_server_handlers(pitaya::handlers![hello_method])
         .with_state(Counter {
             value: Arc::new(Mutex::new(20)),
         })

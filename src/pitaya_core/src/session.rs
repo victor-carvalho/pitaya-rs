@@ -88,7 +88,31 @@ impl Session {
         }
     }
 
-    pub async fn push_to_front(&self) -> Result<(), Error> {
+    pub async fn push_json_msg(
+        &self,
+        _route: impl ToString,
+        _msg: impl serde::Serialize,
+    ) -> Result<(), Error> {
+        todo!()
+    }
+
+    pub async fn push_protobuf_msg(
+        &self,
+        _route: impl ToString,
+        _msg: impl prost::Message,
+    ) -> Result<(), Error> {
+        todo!()
+    }
+
+    pub async fn push_raw_msg(&self, _route: impl ToString, _msg: Vec<u8>) -> Result<(), Error> {
+        todo!()
+    }
+
+    pub async fn kick(&self) -> Result<(), Error> {
+        todo!()
+    }
+
+    pub async fn update_in_front(&self) -> Result<(), Error> {
         if self.is_frontend {
             return Err(Error::FrontendSession);
         }

@@ -317,6 +317,7 @@ impl Discovery for EtcdLazy {
         server_id: &ServerId,
         server_kind: Option<&ServerKind>,
     ) -> Result<Option<Arc<ServerInfo>>, Error> {
+        debug!(self.logger, "finding server by id");
         if let Some(server) = self.only_server_by_id(server_id) {
             return Ok(Some(server));
         }
@@ -332,6 +333,7 @@ impl Discovery for EtcdLazy {
         &mut self,
         server_kind: &ServerKind,
     ) -> Result<Vec<Arc<ServerInfo>>, Error> {
+        debug!(self.logger, "finding servers by kind");
         let servers = self.only_servers_by_kind(server_kind);
         if servers.is_empty() {
             // No servers were found, we'll try to fetch servers information from etcd.

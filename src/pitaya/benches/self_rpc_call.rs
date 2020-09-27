@@ -61,7 +61,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             .with_logger(root_logger)
             .with_rpc_handler({
                 let logger = logger.clone();
-                move |_ctx, rpc| {
+                move |_ctx, _session, rpc| {
                     info!(logger, "!!!!!!!! received rpc req: {:?}", rpc.request());
                     let res = pitaya::protos::Response {
                         data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),

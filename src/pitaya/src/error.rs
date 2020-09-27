@@ -12,6 +12,12 @@ pub enum Error {
     #[error("no servers of kind {0:?} found")]
     NoServersFound(ServerKind),
 
+    #[error("server id not found: {0}")]
+    ServerIdNotFound(String),
+
+    #[error("no server kind on route {0}")]
+    NoServerKindOnRoute(String),
+
     #[error("encode message: {0}")]
     MessageEncode(#[from] prost::EncodeError),
 

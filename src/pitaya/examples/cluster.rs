@@ -18,7 +18,7 @@ async fn entry(mut session: Session) -> Result<JoinResponse, pitaya::Never> {
         println!("failed to bind session: {}", e);
     }
 
-    if let Err(e) = session.push_to_front().await {
+    if let Err(e) = session.update_in_front().await {
         println!("failed to update session data on front: {}", e);
     }
 
