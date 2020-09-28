@@ -133,8 +133,8 @@ int main()
         PitayaLogKind_Function,
         log_function,
         NULL /* log context */,
-        &pitaya
-    );
+        NULL /* custom metrics */,
+        &pitaya);
 
     if (err) {
         printf("failed to initialize pitaya: code=%s, message=%s\n",

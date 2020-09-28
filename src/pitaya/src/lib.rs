@@ -399,6 +399,43 @@ impl Pitaya {
     pub fn logger(&self) -> slog::Logger {
         self.logger.clone()
     }
+
+    pub async fn register_metrics(&mut self, metrics: Vec<metrics::Opts>) -> Result<(), Error> {
+        for metric in metrics {
+            if metric.buckets.len() > 0 {
+                debug!(self.logger, "registering custom histogram: {}", metric.name);
+                // If we have buckets it means this is a histogram.
+                self.metrics_reporter
+                    .write()
+                    .await
+                    .register_histogram(metric)?;
+            } else {
+                debug!(self.logger, "registering custom counter: {}", metric.name);
+                self.metrics_reporter
+                    .write()
+                    .await
+                    .register_counter(metric)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn inc_counter(&self, name: &str) {
+        if let Err(e) = self.metrics_reporter.read().await.inc_counter(name) {
+            warn!(self.logger, "failed to increment counter"; "name" => name, "error" => %e);
+        }
+    }
+
+    pub async fn observe_hist(&self, name: &str, value: f64, labels: &[&str]) {
+        if let Err(e) = self
+            .metrics_reporter
+            .read()
+            .await
+            .observe_hist(name, value, labels)
+        {
+            warn!(self.logger, "failed to observe histogram"; "name" => name, "error" => %e);
+        }
+    }
 }
 
 pub struct PitayaBuilder<'a> {
@@ -414,6 +451,7 @@ pub struct PitayaBuilder<'a> {
     client_handlers: handler::Handlers,
     server_handlers: handler::Handlers,
     container: state::Container,
+    metrics: Vec<metrics::Opts>,
 }
 
 impl<'a> Default for PitayaBuilder<'a> {
@@ -435,6 +473,7 @@ impl<'a> PitayaBuilder<'a> {
             client_handlers: handler::Handlers::new(),
             server_handlers: handler::Handlers::new(),
             container: state::Container::new(),
+            metrics: Vec::new(),
         }
     }
 
@@ -495,6 +534,11 @@ impl<'a> PitayaBuilder<'a> {
         if !self.container.set(state) {
             panic!("cannot set state for the given type, since it was already set");
         }
+        self
+    }
+
+    pub fn with_custom_metrics(mut self, metrics: Vec<metrics::Opts>) -> Self {
+        self.metrics = metrics;
         self
     }
 
@@ -593,6 +637,8 @@ impl<'a> PitayaBuilder<'a> {
             container,
         )
         .await?;
+
+        p.register_metrics(self.metrics).await?;
 
         if let Some(subscriber) = self.cluster_subscriber {
             p.add_cluster_subscriber(subscriber).await;

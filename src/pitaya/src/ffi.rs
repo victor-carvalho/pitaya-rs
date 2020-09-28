@@ -1,4 +1,4 @@
-use crate::{cluster, context, protos, utils, PitayaBuilder, ServerId, ServerKind};
+use crate::{cluster, context, metrics, protos, utils, PitayaBuilder, ServerId, ServerKind};
 use pitaya_core::Route;
 use prost::Message;
 use slog::{error, o, Drain};
@@ -43,6 +43,87 @@ pub extern "C" fn pitaya_error_message(err: *mut PitayaError) -> *const c_char {
 #[no_mangle]
 pub extern "C" fn pitaya_error_drop(error: *mut PitayaError) {
     let _ = unsafe { Box::from_raw(error) };
+}
+
+//
+// PitayaCustomMetrics
+//
+pub struct PitayaCustomMetrics {
+    metrics: Vec<metrics::Opts>,
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_custom_metrics_new() -> *mut PitayaCustomMetrics {
+    Box::into_raw(Box::new(PitayaCustomMetrics {
+        metrics: Vec::new(),
+    }))
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_custom_metrics_drop(m: *mut PitayaCustomMetrics) {
+    if m == null_mut() {
+        return;
+    }
+    let _ = unsafe { Box::from_raw(m) };
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_custom_metrics_add_hist(
+    m: *mut PitayaCustomMetrics,
+    namespace: *mut c_char,
+    subsystem: *mut c_char,
+    name: *mut c_char,
+    help: *mut c_char,
+    variable_labels: *mut *mut c_char,
+    variable_labels_count: u32,
+    buckets: *mut f64,
+    buckets_count: u32,
+) {
+    let mut m = unsafe { mem::ManuallyDrop::new(Box::from_raw(m)) };
+    let variable_labels: Vec<String> = unsafe {
+        slice::from_raw_parts(variable_labels, variable_labels_count as usize)
+            .iter()
+            .map(|l| c_string_to_string(*l))
+            .collect()
+    };
+    let buckets = unsafe { slice::from_raw_parts(buckets, buckets_count as usize) };
+    let opts = metrics::Opts {
+        namespace: unsafe { c_string_to_string(namespace) },
+        subsystem: unsafe { c_string_to_string(subsystem) },
+        name: unsafe { c_string_to_string(name) },
+        help: unsafe { c_string_to_string(help) },
+        variable_labels: variable_labels,
+        buckets: Vec::from(buckets),
+    };
+    m.metrics.push(opts);
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_custom_metrics_add_counter(
+    m: *mut PitayaCustomMetrics,
+    namespace: *mut c_char,
+    subsystem: *mut c_char,
+    name: *mut c_char,
+    help: *mut c_char,
+    variable_labels: *mut *mut c_char,
+    variable_labels_count: u32,
+) {
+    let mut m = unsafe { mem::ManuallyDrop::new(Box::from_raw(m)) };
+    let variable_labels: Vec<String> = unsafe {
+        slice::from_raw_parts(variable_labels, variable_labels_count as usize)
+            .iter()
+            .map(|l| c_string_to_string(*l))
+            .collect()
+    };
+    let opts = metrics::Opts {
+        namespace: unsafe { c_string_to_string(namespace) },
+        subsystem: unsafe { c_string_to_string(subsystem) },
+        name: unsafe { c_string_to_string(name) },
+        help: unsafe { c_string_to_string(help) },
+        variable_labels: variable_labels,
+        buckets: Vec::new(),
+    };
+    m.metrics.push(opts);
 }
 
 //
@@ -390,6 +471,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
     log_kind: PitayaLogKind,
     log_function: extern "C" fn(*mut c_void, *mut c_char),
     log_ctx: *mut c_void,
+    custom_metrics: *mut PitayaCustomMetrics,
     pitaya: *mut *mut Pitaya,
 ) -> *mut PitayaError {
     assert!(!env_prefix.is_null());
@@ -465,6 +547,12 @@ pub extern "C" fn pitaya_initialize_with_nats(
                         );
                     }
                 }
+            })
+            .with_custom_metrics(if custom_metrics == null_mut() {
+                vec![]
+            } else {
+                let c = unsafe { Box::from_raw(custom_metrics) };
+                c.metrics
             })
             .build()
             .await
@@ -718,4 +806,54 @@ pub extern "C" fn pitaya_send_push_to_user(
             }
         }
     });
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_metrics_inc_counter(
+    p: *mut Pitaya,
+    name: *mut c_char,
+    callback: extern "C" fn(*mut c_void),
+    user_data: *mut c_void,
+) {
+    let p = unsafe { Box::from_raw(p) };
+    let name = unsafe { c_string_to_string(name) };
+    let user_data = PitayaUserData(user_data);
+    let pitaya_server = p.pitaya_server.clone();
+    p.runtime.spawn(async move {
+        pitaya_server.inc_counter(&name).await;
+        callback(user_data.0);
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_metrics_observe_hist(
+    p: *mut Pitaya,
+    name: *mut c_char,
+    value: f64,
+    labels: *mut *mut c_char,
+    labels_count: usize,
+    callback: extern "C" fn(*mut c_void),
+    user_data: *mut c_void,
+) {
+    let p = unsafe { Box::from_raw(p) };
+    let name = unsafe { c_string_to_string(name) };
+    let labels: Vec<String> = unsafe {
+        slice::from_raw_parts(labels, labels_count)
+            .iter()
+            .map(|c_str| c_string_to_string(*c_str))
+            .collect()
+    };
+    let user_data = PitayaUserData(user_data);
+    let pitaya_server = p.pitaya_server.clone();
+    p.runtime.spawn(async move {
+        let labels_ref: Vec<&str> = labels.iter().map(|l| l.as_str()).collect();
+        pitaya_server
+            .observe_hist(&name, value, &labels_ref[..])
+            .await;
+        callback(user_data.0);
+    });
+}
+
+unsafe fn c_string_to_string(s: *mut c_char) -> String {
+    CStr::from_ptr(s).to_string_lossy().to_string()
 }

@@ -28,6 +28,14 @@ namespace PitayaCSharpExample
                 PitayaCluster.Terminate();
             };
 
+            var customMetrics = new CustomMetrics("csharp_namespace");
+            customMetrics.AddCounter(
+                subsystem: "random_subsystem",
+                name: "super_metric",
+                help: "this metric is amazing man",
+                variableLabels: new string[] { }
+            );
+
             try
             {
                 PitayaCluster.Initialize(
@@ -39,6 +47,7 @@ namespace PitayaCSharpExample
                     {
                         Console.Write($"C# Log: {msg}");
                     },
+                    customMetrics,
                     new PitayaCluster.ServiceDiscoveryListener((action, server) =>
                     {
                         switch (action)

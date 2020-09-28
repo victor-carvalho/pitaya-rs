@@ -102,6 +102,7 @@ namespace NPitaya
                                       NativeLogLevel logLevel,
                                       NativeLogKind logKind,
                                       Action<string> logFunction,
+                                      CustomMetrics customMetrics = null,
                                       ServiceDiscoveryListener serviceDiscoveryListener = null)
         {
             _serviceDiscoveryListener = serviceDiscoveryListener;
@@ -120,6 +121,7 @@ namespace NPitaya
                 logKind,
                 Marshal.GetFunctionPointerForDelegate(logFunctionCallback),
                 GCHandle.ToIntPtr(logCtx),
+                customMetrics == null ? IntPtr.Zero : customMetrics.Ptr,
                 out pitaya
             );
 

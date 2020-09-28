@@ -47,6 +47,7 @@ namespace NPitaya
             NativeLogKind logKind,
             IntPtr logFunction,
             IntPtr logCtx,
+            IntPtr customMetrics,
             out IntPtr pitaya);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern void pitaya_shutdown(IntPtr pitaya);
@@ -142,33 +143,40 @@ namespace NPitaya
             IntPtr userData);
 
         //
-        // Session
+        // CustomMetrics
         //
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_session_drop(IntPtr session);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_session_push(
-            IntPtr pitaya,
-            IntPtr session,
-            string route,
-            IntPtr buffer,
-            FinishCallback callback,
-            IntPtr userData);
+        internal static extern IntPtr pitaya_custom_metrics_new();
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_session_bind(
-            IntPtr pitaya,
-            IntPtr session,
-            string uid,
-            FinishCallback callback,
-            IntPtr userData);
+        internal static extern void pitaya_custom_metrics_drop(IntPtr customMetrics);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_session_update_in_front(
-            IntPtr pitaya,
-            IntPtr session,
-            FinishCallback callback,
-            IntPtr userData);
+        internal static extern void pitaya_custom_metrics_add_hist(
+            IntPtr customMetrics,
+            string metricNamespace,
+            string subsystem,
+            string name,
+            string help,
+            string[] variableLabels,
+            UInt32 variableLabelsCount,
+            double[] buckets,
+            UInt32 buckets_count
+        );
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pitaya_custom_metrics_add_counter(
+            IntPtr customMetrics,
+            string metricNamespace,
+            string subsystem,
+            string name,
+            string help,
+            string[] variableLabels,
+            UInt32 variableLabelsCount
+        );
+
+        // TODO: inc counter
+        // TODO: observe histogram
     }
 }

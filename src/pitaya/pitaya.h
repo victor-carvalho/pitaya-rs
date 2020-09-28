@@ -34,6 +34,8 @@ typedef struct PitayaBuffer PitayaBuffer;
 
 typedef struct PitayaContext PitayaContext;
 
+typedef struct PitayaCustomMetrics PitayaCustomMetrics;
+
 typedef struct PitayaError PitayaError;
 
 typedef struct PitayaRpc PitayaRpc;
@@ -50,6 +52,28 @@ void pitaya_buffer_drop(PitayaBuffer *buf);
 
 PitayaBuffer *pitaya_buffer_new(const uint8_t *data, int32_t len);
 
+void pitaya_custom_metrics_add_counter(PitayaCustomMetrics *m,
+                                       char *namespace_,
+                                       char *subsystem,
+                                       char *name,
+                                       char *help,
+                                       char **variable_labels,
+                                       uint32_t variable_labels_count);
+
+void pitaya_custom_metrics_add_hist(PitayaCustomMetrics *m,
+                                    char *namespace_,
+                                    char *subsystem,
+                                    char *name,
+                                    char *help,
+                                    char **variable_labels,
+                                    uint32_t variable_labels_count,
+                                    double *buckets,
+                                    uint32_t buckets_count);
+
+void pitaya_custom_metrics_drop(PitayaCustomMetrics *m);
+
+PitayaCustomMetrics *pitaya_custom_metrics_new(void);
+
 const char *pitaya_error_code(PitayaError *err);
 
 void pitaya_error_drop(PitayaError *error);
@@ -65,7 +89,18 @@ PitayaError *pitaya_initialize_with_nats(void *user_ctx,
                                          PitayaLogKind log_kind,
                                          void (*log_function)(void*, char*),
                                          void *log_ctx,
+                                         PitayaCustomMetrics *custom_metrics,
                                          Pitaya **pitaya);
+
+void pitaya_metrics_inc_counter(Pitaya *p, char *name, void (*callback)(void*), void *user_data);
+
+void pitaya_metrics_observe_hist(Pitaya *p,
+                                 char *name,
+                                 double value,
+                                 char **labels,
+                                 uintptr_t labels_count,
+                                 void (*callback)(void*),
+                                 void *user_data);
 
 void pitaya_rpc_drop(PitayaRpc *rpc);
 
