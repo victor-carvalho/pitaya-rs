@@ -47,12 +47,9 @@ jobs:
           cd example-pitaya-server
           go build main.go
 
-          docker-compose up -d
+          makers deps
           cargo test
-          docker-compose down
-          #makers deps
-          #cargo test
-          #makers undeps
+          makers undeps
 
   fmt:
     name: fmt
@@ -75,6 +72,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+        with:
+          submodules: true
       - name: Install Rust
         run: rustup update stable
       - name: Install clippy
