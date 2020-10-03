@@ -47,9 +47,15 @@ jobs:
 
       - name: test pitaya
         run: |
-          makers deps
+          cd example-pitaya-server
+          go build main.go
+
+          docker-compose up -d
           cargo test
-          makers undeps
+          docker-compose down
+          #makers deps
+          #cargo test
+          #makers undeps
 
   fmt:
     name: fmt
