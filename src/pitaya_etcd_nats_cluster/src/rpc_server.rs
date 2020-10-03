@@ -270,7 +270,7 @@ mod tests {
                 loop {
                     if let Some(rpc) = rpc_server_conn.recv().await {
                         let res = protos::Response {
-                            data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
+                            data: b"HEY, THIS IS THE SERVER".to_vec(),
                             error: None,
                         };
                         if rpc.responder().send(res).is_err() {
@@ -298,7 +298,7 @@ mod tests {
                     message::Message {
                         kind: message::Kind::Request,
                         id: 12,
-                        data: "sending some data".as_bytes().to_owned(),
+                        data: b"sending some data".to_vec(),
                         route: "room.room.join".to_owned(),
                         compressed: false,
                         err: false,

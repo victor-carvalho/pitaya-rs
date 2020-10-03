@@ -36,12 +36,12 @@ async fn main() {
                 r#type: pitaya::protos::RpcType::User as i32,
                 msg: Some(pitaya::protos::Msg {
                     r#type: pitaya::protos::MsgType::MsgRequest as i32,
-                    data: "sending some data".as_bytes().to_owned(),
+                    data: b"sending some data".to_vec(),
                     route: "csharp.room.join".to_owned(),
                     ..pitaya::protos::Msg::default()
                 }),
                 frontend_id: "".to_owned(),
-                metadata: "{}".as_bytes().to_owned(),
+                metadata: b"{}".to_vec(),
                 ..pitaya::protos::Request::default()
             },
         )
