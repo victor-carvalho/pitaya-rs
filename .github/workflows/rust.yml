@@ -44,9 +44,6 @@ jobs:
 
       - name: test pitaya
         run: |
-          cd example-pitaya-server
-          go build main.go
-
           makers deps
           cargo test
           makers undeps
