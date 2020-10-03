@@ -77,7 +77,7 @@ impl Session {
                 logger,
                 uid: s.uid.clone(),
                 frontend_id: ServerId::from(&req.frontend_id),
-                frontend_session_id: s.id.clone(),
+                frontend_session_id: s.id,
                 rpc_client,
                 discovery,
                 is_frontend: false,
