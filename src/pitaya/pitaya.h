@@ -27,6 +27,9 @@ typedef enum {
 
 /**
  * Pitaya represent a pitaya server.
+ *
+ * It will registers itself using a service discovery client in order
+ * to be discovered and send RPCs to other Pitaya servers.
  */
 typedef struct Pitaya Pitaya;
 

@@ -39,6 +39,9 @@ struct ClusterComponents {
 }
 
 /// Pitaya represent a pitaya server.
+///
+/// It will registers itself using a service discovery client in order
+/// to be discovered and send RPCs to other Pitaya servers.
 pub struct Pitaya {
     discovery: Arc<Mutex<Box<dyn cluster::Discovery>>>,
     rpc_server: Arc<Box<dyn cluster::RpcServer>>,
@@ -104,6 +107,10 @@ impl Pitaya {
         })
     }
 
+    /// Try to get a server info using its id.
+    ///
+    /// The function will fail in case of network errors. The server info will be
+    /// returned only in the case of this server existing.
     pub async fn server_by_id(
         &mut self,
         server_id: &ServerId,
@@ -114,6 +121,7 @@ impl Pitaya {
         Ok(server)
     }
 
+    /// Gracefully shuts down the Pitaya server.
     pub async fn shutdown(self) -> Result<(), Error> {
         let tasks = self
             .shared_state
@@ -143,6 +151,13 @@ impl Pitaya {
         Ok(())
     }
 
+    /// Sends an RPC to a server.
+    ///
+    /// Passing a server kind is only an optimization for the service
+    /// discovery client. By giving the kind of the server, it is easier for
+    /// the service discovery client to find the provided server id.
+    ///
+    /// The method will either return an error or a response that comes from the server.
     pub async fn send_rpc_to_server(
         &mut self,
         ctx: context::Context,
@@ -187,6 +202,9 @@ impl Pitaya {
         }
     }
 
+    /// Similar to the method `send_rpc_to_server`. The difference is that the RPC will not be
+    /// sent to a specific Server. It will randomize over all servers of the specified server kind
+    /// on the route.
     pub async fn send_rpc(
         &self,
         ctx: context::Context,
@@ -371,7 +389,7 @@ impl Pitaya {
         }
     }
 
-    pub async fn add_cluster_subscriber(
+    async fn add_cluster_subscriber(
         &mut self,
         mut subscriber: Box<dyn FnMut(cluster::Notification) + Send + 'static>,
     ) {
@@ -398,11 +416,12 @@ impl Pitaya {
         });
     }
 
+    /// Gets the logger instance from the Pitaya server.
     pub fn logger(&self) -> slog::Logger {
         self.logger.clone()
     }
 
-    pub async fn register_metrics(&mut self, metrics: Vec<metrics::Opts>) -> Result<(), Error> {
+    async fn register_metrics(&mut self, metrics: Vec<metrics::Opts>) -> Result<(), Error> {
         for metric in metrics {
             if !metric.buckets.is_empty() {
                 debug!(self.logger, "registering custom histogram: {}", metric.name);
@@ -440,6 +459,8 @@ impl Pitaya {
     }
 }
 
+/// Use to construct a new Pitaya instance. You can construct the instance directly as well,
+/// but in most cases you'll want to use this struct instead.
 pub struct PitayaBuilder<'a> {
     frontend: bool,
     logger: Option<slog::Logger>,
@@ -461,6 +482,7 @@ impl<'a> Default for PitayaBuilder<'a> {
 }
 
 impl<'a> PitayaBuilder<'a> {
+    /// Creates a new PitayaBuilder instance.
     pub fn new() -> Self {
         Self {
             frontend: false,
@@ -477,31 +499,42 @@ impl<'a> PitayaBuilder<'a> {
         }
     }
 
+    /// Specify the root logger for the Pitaya instance.
     pub fn with_logger(mut self, logger: slog::Logger) -> Self {
         self.logger.replace(logger);
         self
     }
 
+    /// Specifies the client handlers used by the server.
     pub fn with_client_handlers(mut self, handlers: handler::Handlers) -> Self {
         self.client_handlers = handlers;
         self
     }
 
+    /// Specifies the server handlers used by the server.
     pub fn with_server_handlers(mut self, handlers: handler::Handlers) -> Self {
         self.server_handlers = handlers;
         self
     }
 
+    /// Specify whether the server will be a frontend server or not.
     pub fn with_frontend(mut self, frontend: bool) -> Self {
         self.frontend = frontend;
         self
     }
 
+    /// Specifies the raw rpc handler used by the server. This method is mutually exclusive with
+    /// `with_client_handlers` and `with_server_handlers`.
+    ///
+    /// In most cases you'll not be using this method. This is mainly used for creating FFI
+    /// bindings with other languages.
     pub fn with_rpc_handler(mut self, handler: RpcHandler) -> Self {
         self.rpc_handler.replace(handler);
         self
     }
 
+    /// Specifies a listener for service discovery. The subscriber will be called whenever a new
+    /// server is discovered or when it is removed from the known servers list.
     pub fn with_cluster_subscriber<F>(mut self, subscriber: F) -> Self
     where
         F: FnMut(cluster::Notification) + Send + 'static,
@@ -510,21 +543,30 @@ impl<'a> PitayaBuilder<'a> {
         self
     }
 
+    /// Specifies the env prefix for the configuration file. This can be used for overriding configuration
+    /// values specified either with a config value or with `with_base_settings`.
     pub fn with_env_prefix(mut self, prefix: &'a str) -> Self {
         self.env_prefix.replace(prefix);
         self
     }
 
+    /// Specifies the config file to be used.
     pub fn with_config_file(mut self, config_file: &'a str) -> Self {
         self.config_file.replace(config_file);
         self
     }
 
+    /// Specifies the base settings to be used. These settings are the least prioritary. Their values
+    /// will be overwritten by config files and then environment variables.
     pub fn with_base_settings(mut self, base_settings: settings::Settings) -> Self {
         self.base_settings = base_settings;
         self
     }
 
+    /// Specifies a state to be managed by Pitaya. They can be later queries on a handler using
+    /// `pitaya::State`.
+    ///
+    /// Since a state will be sent and used between threads, the type has to be `Sync + Send + 'static`.
     pub fn with_state<T: Sync + Send + 'static>(self, state: T) -> Self {
         if !self.container.set(state) {
             panic!("cannot set state for the given type, since it was already set");
@@ -532,11 +574,18 @@ impl<'a> PitayaBuilder<'a> {
         self
     }
 
+    /// Specifies custom metrics that will be registered on the server.
     pub fn with_custom_metrics(mut self, metrics: Vec<metrics::Opts>) -> Self {
         self.metrics = metrics;
         self
     }
 
+    /// Builds the Pitaya instance.
+    ///
+    /// A Pitaya instance will be returned and also a shutdown receiver.
+    /// Listening for the receiver channel is a way of having a graceful shutdown implementation.
+    /// By default Pitaya will listen for SIGINT and SIGTERM, as well as internal errors.
+    /// When the channel is called, the application should call `Pitaya::shutdown`.
     pub async fn build(mut self) -> Result<(Pitaya, oneshot::Receiver<()>), Error> {
         if self.rpc_handler.is_none()
             && (self.client_handlers.is_empty() && self.server_handlers.is_empty())
