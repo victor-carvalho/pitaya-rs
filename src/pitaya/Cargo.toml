@@ -1,8 +1,13 @@
 [package]
 name = "pitaya"
 version = "0.1.0"
-authors = ["Leonardo Hahn <leonardo.hahn@tfgco.com>"]
+authors = ["Leonardo Hahn <leonnardo.hahn@gmail.com>"]
 edition = "2018"
+license-file = "LICENSE"
+keywords = ["gamedev", "server", "rpc", "pomelo"]
+categories = ["asynchronous", "game-development", "network-programming"]
+description = "Framework for easily creating game servers in Rust and other languages"
+repository = "https://github.com/tfgco/pitaya-rs"
 
 [lib]
 name = "pitaya"

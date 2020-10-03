@@ -459,7 +459,9 @@ impl Pitaya {
     }
 }
 
-/// Use to construct a new Pitaya instance. You can construct the instance directly as well,
+/// Use to construct a new Pitaya instance.
+///
+/// You can construct the instance directly as well,
 /// but in most cases you'll want to use this struct instead.
 pub struct PitayaBuilder<'a> {
     frontend: bool,
