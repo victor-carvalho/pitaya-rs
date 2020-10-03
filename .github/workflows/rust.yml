@@ -76,7 +76,10 @@ jobs:
     steps:
       - name: Checkout submodules
         shell: bash
-        run: git submodule update --init
+        run: |
+          pwd
+          ls
+          git submodule update --init
 
       - uses: actions/checkout@v2
       - name: Install Rust
