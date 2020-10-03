@@ -81,6 +81,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
 
       - name: "doc --lib --all-features"
         run: cargo doc --lib --no-deps --all-features
