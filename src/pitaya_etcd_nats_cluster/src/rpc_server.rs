@@ -267,17 +267,13 @@ mod tests {
 
         let handle = {
             tokio::spawn(async move {
-                loop {
-                    if let Some(rpc) = rpc_server_conn.recv().await {
-                        let res = protos::Response {
-                            data: b"HEY, THIS IS THE SERVER".to_vec(),
-                            error: None,
-                        };
-                        if rpc.responder().send(res).is_err() {
-                            panic!("failed to respond rpc");
-                        }
-                    } else {
-                        break;
+                while let Some(rpc) = rpc_server_conn.recv().await {
+                    let res = protos::Response {
+                        data: b"HEY, THIS IS THE SERVER".to_vec(),
+                        error: None,
+                    };
+                    if rpc.responder().send(res).is_err() {
+                        panic!("failed to respond rpc");
                     }
                 }
             })
