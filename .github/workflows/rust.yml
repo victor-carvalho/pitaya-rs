@@ -74,6 +74,10 @@ jobs:
     name: clippy
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout submodules
+        shell: bash
+        run: git submodule sync --recursive
+
       - uses: actions/checkout@v2
       - name: Install Rust
         run: rustup update stable
@@ -88,6 +92,10 @@ jobs:
     name: docs
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout submodules
+        shell: bash
+        run: git submodule sync --recursive
+
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
