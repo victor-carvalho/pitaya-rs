@@ -18,7 +18,7 @@ async fn send_rpc(
                     ..pitaya::protos::Msg::default()
                 }),
                 frontend_id: "".to_owned(),
-                metadata: "{}".as_bytes().to_owned(),
+                metadata: b"{}".to_vec(),
                 ..pitaya::protos::Request::default()
             },
         )
@@ -56,7 +56,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 move |_ctx, _session, rpc| {
                     info!(logger, "!!!!!!!! received rpc req: {:?}", rpc.request());
                     let res = pitaya::protos::Response {
-                        data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
+                        data: b"HEY, THIS IS THE SERVER".to_vec(),
                         error: None,
                     };
                     if !rpc.respond(res) {

@@ -338,7 +338,7 @@ mod tests {
 
         assert_eq!(servers_by_kind.len(), 1);
 
-        let rpc_data = r#"{
+        let rpc_data = br#"{
             "name": "superMessage",
             "content": "how are you?"
         }"#;
@@ -350,7 +350,7 @@ mod tests {
                 message::Message {
                     kind: message::Kind::Request,
                     id: 20,
-                    data: rpc_data.as_bytes().to_owned(),
+                    data: rpc_data.to_vec(),
                     compressed: false,
                     err: false,
                     route: "room.room.join".to_string(),

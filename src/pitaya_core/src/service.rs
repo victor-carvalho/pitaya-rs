@@ -11,12 +11,14 @@ use slog::{debug, error, o, warn};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+pub type RpcHandler = Box<dyn Fn(Context, Option<Session>, cluster::Rpc) + Send + Sync + 'static>;
+
 pub enum RpcDispatch {
     Handlers {
         client: Arc<Handlers>,
         server: Arc<Handlers>,
     },
-    Raw(Box<dyn Fn(Context, Option<Session>, cluster::Rpc) + Send + Sync + 'static>),
+    Raw(RpcHandler),
 }
 
 // Remote is a service that is capable of handling RPC messages from other pitaya servers

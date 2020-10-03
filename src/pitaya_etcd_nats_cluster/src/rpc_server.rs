@@ -267,17 +267,13 @@ mod tests {
 
         let handle = {
             tokio::spawn(async move {
-                loop {
-                    if let Some(rpc) = rpc_server_conn.recv().await {
-                        let res = protos::Response {
-                            data: "HEY, THIS IS THE SERVER".as_bytes().to_owned(),
-                            error: None,
-                        };
-                        if rpc.responder().send(res).is_err() {
-                            panic!("failed to respond rpc");
-                        }
-                    } else {
-                        break;
+                while let Some(rpc) = rpc_server_conn.recv().await {
+                    let res = protos::Response {
+                        data: b"HEY, THIS IS THE SERVER".to_vec(),
+                        error: None,
+                    };
+                    if rpc.responder().send(res).is_err() {
+                        panic!("failed to respond rpc");
                     }
                 }
             })
@@ -298,7 +294,7 @@ mod tests {
                     message::Message {
                         kind: message::Kind::Request,
                         id: 12,
-                        data: "sending some data".as_bytes().to_owned(),
+                        data: b"sending some data".to_vec(),
                         route: "room.room.join".to_owned(),
                         compressed: false,
                         err: false,

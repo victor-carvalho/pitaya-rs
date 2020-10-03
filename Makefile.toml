@@ -39,6 +39,14 @@ go build main.go
 '''
 ]
 
+[taks.clippy]
+workspace = false
+script = [
+'''
+cargo clippy --all --tests
+'''
+]
+
 [tasks.run-example-server]
 workspace = false
 private = true
