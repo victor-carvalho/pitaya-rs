@@ -10,7 +10,9 @@ pub use pitaya_core::{
 };
 use pitaya_core::{
     cluster::server::{ServerId, ServerInfo, ServerKind},
-    constants as core_constants, context, service, Route,
+    constants as core_constants, context,
+    service::{self, RpcHandler},
+    Route,
 };
 pub use pitaya_etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 pub use pitaya_macros::{handlers, json_handler, protobuf_handler};
@@ -196,8 +198,8 @@ impl Pitaya {
         let route = Route::try_from_str(route_str.to_string()).ok_or(Error::InvalidRoute)?;
         let server_kind = route
             .server_kind()
-            .map(|k| ServerKind::from(k))
-            .ok_or(Error::NoServerKindOnRoute(route_str.to_string()))?;
+            .map(ServerKind::from)
+            .ok_or_else(|| Error::NoServerKindOnRoute(route_str.to_string()))?;
 
         debug!(self.logger, "getting servers");
         let servers = self
@@ -402,7 +404,7 @@ impl Pitaya {
 
     pub async fn register_metrics(&mut self, metrics: Vec<metrics::Opts>) -> Result<(), Error> {
         for metric in metrics {
-            if metric.buckets.len() > 0 {
+            if !metric.buckets.is_empty() {
                 debug!(self.logger, "registering custom histogram: {}", metric.name);
                 // If we have buckets it means this is a histogram.
                 self.metrics_reporter
@@ -445,9 +447,7 @@ pub struct PitayaBuilder<'a> {
     env_prefix: Option<&'a str>,
     config_file: Option<&'a str>,
     base_settings: settings::Settings,
-    rpc_handler: Option<
-        Box<dyn Fn(context::Context, Option<Session>, cluster::Rpc) + Send + Sync + 'static>,
-    >,
+    rpc_handler: Option<RpcHandler>,
     client_handlers: handler::Handlers,
     server_handlers: handler::Handlers,
     container: state::Container,
@@ -497,12 +497,7 @@ impl<'a> PitayaBuilder<'a> {
         self
     }
 
-    pub fn with_rpc_handler(
-        mut self,
-        handler: Box<
-            dyn Fn(context::Context, Option<Session>, cluster::Rpc) + Send + Sync + 'static,
-        >,
-    ) -> Self {
+    pub fn with_rpc_handler(mut self, handler: RpcHandler) -> Self {
         self.rpc_handler.replace(handler);
         self
     }

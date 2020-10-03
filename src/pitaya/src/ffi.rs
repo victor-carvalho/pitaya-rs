@@ -61,7 +61,7 @@ pub extern "C" fn pitaya_custom_metrics_new() -> *mut PitayaCustomMetrics {
 
 #[no_mangle]
 pub extern "C" fn pitaya_custom_metrics_drop(m: *mut PitayaCustomMetrics) {
-    if m == null_mut() {
+    if m.is_null() {
         return;
     }
     let _ = unsafe { Box::from_raw(m) };
@@ -92,7 +92,7 @@ pub extern "C" fn pitaya_custom_metrics_add_hist(
         subsystem: unsafe { c_string_to_string(subsystem) },
         name: unsafe { c_string_to_string(name) },
         help: unsafe { c_string_to_string(help) },
-        variable_labels: variable_labels,
+        variable_labels,
         buckets: Vec::from(buckets),
     };
     m.metrics.push(opts);
@@ -120,7 +120,7 @@ pub extern "C" fn pitaya_custom_metrics_add_counter(
         subsystem: unsafe { c_string_to_string(subsystem) },
         name: unsafe { c_string_to_string(name) },
         help: unsafe { c_string_to_string(help) },
-        variable_labels: variable_labels,
+        variable_labels,
         buckets: Vec::new(),
     };
     m.metrics.push(opts);
@@ -548,7 +548,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
                     }
                 }
             })
-            .with_custom_metrics(if custom_metrics == null_mut() {
+            .with_custom_metrics(if custom_metrics.is_null() {
                 vec![]
             } else {
                 let c = unsafe { Box::from_raw(custom_metrics) };
@@ -656,9 +656,9 @@ pub extern "C" fn pitaya_send_rpc(
             }
         };
 
-        let server_kind = route.server_kind().map(|k| ServerKind::from(k));
+        let server_kind = route.server_kind().map(ServerKind::from);
 
-        let result = if server_id.len() > 0 {
+        let result = if !server_id.is_empty() {
             pitaya_server
                 .send_rpc_to_server(
                     context::Context::empty(),
