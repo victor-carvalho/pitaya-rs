@@ -22,7 +22,7 @@ jobs:
       - docs
     steps:
       - run: exit 0
-    
+
   test:
     name: test tokio full
     runs-on: ${{ matrix.os }}
@@ -31,10 +31,10 @@ jobs:
         os:
           - windows-latest
           - ubuntu-latest
-          - macos-latest  
+          - macos-lates
     steps:
       - uses: actions/checkout@v2
-      
+
       - name: Install Rust
         run: rustup update stable
 
@@ -46,7 +46,7 @@ jobs:
           makers deps
           cargo test
           makers undeps
-          
+
   fmt:
     name: fmt
     runs-on: ubuntu-latest
@@ -59,7 +59,7 @@ jobs:
 
       # Check fmt
       - name: "rustfmt --check"
-        run: cargo fmt -- --check --edition 2018
+        run: cargo fmt -- --check
 
   clippy:
     name: clippy
