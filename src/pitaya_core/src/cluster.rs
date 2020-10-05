@@ -111,7 +111,6 @@ pub trait RpcClient: Send + Sync + 'static {
     // Sends a push to a user connected to a specific frontend server.
     async fn push_to_user(
         &self,
-        server_id: server::ServerId,
         server_kind: server::ServerKind,
         push_msg: protos::Push,
     ) -> Result<(), Error>;

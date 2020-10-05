@@ -759,20 +759,18 @@ pub extern "C" fn pitaya_send_kick(
 #[no_mangle]
 pub extern "C" fn pitaya_send_push_to_user(
     p: *mut Pitaya,
-    server_id: *mut c_char,
+    _server_id: *mut c_char,
     server_kind: *mut c_char,
     push_buffer: *mut PitayaBuffer,
     callback: extern "C" fn(*mut c_void, *mut PitayaError),
     user_data: *mut c_void,
 ) {
     assert!(!p.is_null());
-    assert!(!server_id.is_null());
     assert!(!server_kind.is_null());
     assert!(!push_buffer.is_null());
 
     let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
     let push_buffer = unsafe { mem::ManuallyDrop::new(Box::from_raw(push_buffer)) };
-    let server_id = ServerId::from(unsafe { CStr::from_ptr(server_id).to_string_lossy() });
     let server_kind = ServerKind::from(unsafe { CStr::from_ptr(server_kind).to_string_lossy() });
     let user_data = PitayaUserData(user_data);
 
@@ -790,10 +788,7 @@ pub extern "C" fn pitaya_send_push_to_user(
             }
         };
 
-        match pitaya_server
-            .send_push_to_user(server_id, server_kind, push_msg)
-            .await
-        {
+        match pitaya_server.send_push_to_user(server_kind, push_msg).await {
             Ok(_) => {
                 callback(user_data.0, null_mut());
             }

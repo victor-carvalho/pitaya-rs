@@ -1,11 +1,56 @@
 use pitaya::Session;
 use serde::Serialize;
 use slog::{error, o, Drain};
+use std::collections::HashMap;
 
 #[derive(Serialize)]
 struct JoinResponse {
     code: i32,
     result: String,
+}
+
+struct Error {
+    msg: String,
+}
+
+impl pitaya::ToError for Error {
+    fn to_error(self) -> pitaya::protos::Error {
+        pitaya::protos::Error {
+            code: "PIT-400".to_owned(),
+            msg: self.msg,
+            metadata: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct PushMsg {
+    msg: String,
+}
+
+#[pitaya::json_handler("room", client)]
+async fn hi(session: Session) -> Result<JoinResponse, Error> {
+    if !session.is_bound() {
+        return Err(Error {
+            msg: "session is not bound man!".to_owned(),
+        });
+    }
+
+    let msg = PushMsg {
+        msg: "HELLO, THIS IS A PUSH FROM THE SERVER".to_owned(),
+    };
+
+    // Spawn a new non-blocking task.
+    tokio::spawn(async move {
+        if let Err(e) = session.push_json_msg("my.super.route", msg).await {
+            println!("failed to push msg: {}", e);
+        }
+    });
+
+    Ok(JoinResponse {
+        code: 200,
+        result: String::new(),
+    })
 }
 
 #[pitaya::json_handler("room", client)]
@@ -22,9 +67,27 @@ async fn entry(mut session: Session) -> Result<JoinResponse, pitaya::Never> {
         println!("failed to update session data on front: {}", e);
     }
 
+    if session.is_bound() {
+        if let Err(e) = session.kick().await {
+            println!("failed to kick session: {}", e);
+        }
+    }
+
     Ok(JoinResponse {
         code: 200,
         result: "ok".to_owned(),
+    })
+}
+
+#[pitaya::json_handler("room", client)]
+async fn bind(mut session: Session) -> Result<JoinResponse, pitaya::Never> {
+    if let Err(e) = session.bind("helroow").await {
+        println!("failed to bind session: {}", e);
+    }
+
+    Ok(JoinResponse {
+        code: 200,
+        result: "SESSION BOUND!".to_owned(),
     })
 }
 
@@ -62,7 +125,7 @@ async fn main() {
             ..Default::default()
         })
         .with_logger(logger.clone())
-        .with_client_handlers(pitaya::handlers![room::entry])
+        .with_client_handlers(pitaya::handlers![entry, hi, bind])
         // .with_server_handlers(pitaya::handlers![room::entry])
         .build()
         .await

@@ -6,7 +6,7 @@ pub mod settings;
 pub use error::Error;
 pub use pitaya_core::{
     cluster, context::Context, handler, message, metrics, protos, session::Session, state::State,
-    utils, Never,
+    utils, Never, ToError,
 };
 use pitaya_core::{
     cluster::server::{ServerId, ServerInfo, ServerKind},
@@ -270,13 +270,10 @@ impl Pitaya {
 
     pub async fn send_push_to_user(
         &self,
-        server_id: ServerId,
         server_kind: ServerKind,
         push_msg: protos::Push,
     ) -> Result<(), Error> {
-        self.rpc_client
-            .push_to_user(server_id, server_kind, push_msg)
-            .await?;
+        self.rpc_client.push_to_user(server_kind, push_msg).await?;
         Ok(())
     }
 

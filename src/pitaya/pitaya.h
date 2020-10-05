@@ -119,7 +119,7 @@ void pitaya_send_kick(Pitaya *p,
                       void *user_data);
 
 void pitaya_send_push_to_user(Pitaya *p,
-                              char *server_id,
+                              char *_server_id,
                               char *server_kind,
                               PitayaBuffer *push_buffer,
                               void (*callback)(void*, PitayaError*),
