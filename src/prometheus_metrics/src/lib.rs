@@ -135,8 +135,16 @@ impl Reporter for PrometheusReporter {
         Ok(())
     }
 
-    fn inc_counter(&self, _name: &str) -> Result<(), Error> {
-        todo!()
+    fn inc_counter(&self, name: &str) -> Result<(), Error> {
+        if let Some(counter) = self.counters.get(name) {
+            counter.with_label_values(&[]).inc();
+            Ok(())
+        } else {
+            Err(Error::InvalidMetric(format!(
+                "unknown metric named {}",
+                name
+            )))
+        }
     }
 
     fn observe_hist(&self, name: &str, value: f64, labels: &[&str]) -> Result<(), Error> {
@@ -145,7 +153,7 @@ impl Reporter for PrometheusReporter {
             Ok(())
         } else {
             Err(Error::InvalidMetric(format!(
-                "unknown metrics named {}",
+                "unknown metric named {}",
                 name
             )))
         }

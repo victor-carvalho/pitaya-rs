@@ -1,4 +1,4 @@
-use pitaya::Session;
+use pitaya::{metrics::ThreadSafeReporter, Session, State};
 use serde::Serialize;
 use slog::{error, o, Drain};
 use std::collections::HashMap;
@@ -80,9 +80,16 @@ async fn entry(mut session: Session) -> Result<JoinResponse, pitaya::Never> {
 }
 
 #[pitaya::json_handler("room", client)]
-async fn bind(mut session: Session) -> Result<JoinResponse, pitaya::Never> {
+async fn bind(
+    mut session: Session,
+    reporter: State<'_, ThreadSafeReporter>,
+) -> Result<JoinResponse, pitaya::Never> {
     if let Err(e) = session.bind("helroow").await {
         println!("failed to bind session: {}", e);
+    }
+
+    if let Err(e) = reporter.read().await.inc_counter("my_metric") {
+        println!("failed to increment counter: {}", e);
     }
 
     Ok(JoinResponse {
@@ -122,10 +129,22 @@ async fn main() {
     let (pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
         .with_base_settings(pitaya::settings::Settings {
             server_kind: "room".into(),
+            metrics: pitaya::settings::Metrics {
+                enabled: true,
+                ..Default::default()
+            },
             ..Default::default()
         })
         .with_logger(logger.clone())
         .with_client_handlers(pitaya::handlers![entry, hi, bind])
+        .with_custom_metrics(vec![pitaya::metrics::Opts {
+            namespace: "cluster_example".to_owned(),
+            subsystem: "room".to_owned(),
+            name: "my_metric".to_owned(),
+            help: "my metric help string".to_owned(),
+            variable_labels: vec![],
+            buckets: vec![],
+        }])
         // .with_server_handlers(pitaya::handlers![room::entry])
         .build()
         .await

@@ -33,18 +33,18 @@ pub enum Error {
     SessionNotBound,
 }
 
-// Session represents the state of a client connection in a frontend server.
-// The session struct is propagated through RPC calls between frontend and backend servers.
+/// Session represents the state of a client connection in a frontend server.
+/// The session struct is propagated through RPC calls between frontend and backend servers.
 pub struct Session {
-    // The user id of the session.
+    /// The user id of the session.
     pub uid: String,
-    // The server id from which this session belongs to.
+    /// The server id from which this session belongs to.
     pub frontend_id: ServerId,
-    // The id of the session on the frontend server.
+    /// The id of the session on the frontend server.
     pub frontend_session_id: i64,
-    // Whether this is a frontend session or not.
+    /// Whether this is a frontend session or not.
     pub is_frontend: bool,
-    // Json information that can be propagated with the session along RPCs.
+    /// Json information that can be propagated with the session along RPCs.
     pub data: HashMap<String, serde_json::Value>,
 
     discovery: Arc<Mutex<Box<dyn Discovery>>>,

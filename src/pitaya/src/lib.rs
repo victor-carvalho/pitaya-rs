@@ -640,8 +640,15 @@ impl<'a> PitayaBuilder<'a> {
             .await?,
         )));
 
-        // Freeze state, so we cannot modify it later.
+        if !self
+            .container
+            .set::<metrics::ThreadSafeReporter>(metrics_reporter.clone())
+        {
+            panic!("should not fail to set metrics reporter state");
+        }
+
         self.container.freeze();
+        // Freeze state, so we cannot modify it later.
         let container = Arc::new(self.container);
 
         let rpc_server: Arc<Box<dyn cluster::RpcServer>> = Arc::new(Box::new(NatsRpcServer::new(
