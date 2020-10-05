@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 
 const BIND_ROUTE: &str = "sys.bindsession";
 const SESSION_PUSH_ROUTE: &str = "sys.pushsession";
+const KICK_ROUTE: &str = "sys.kick";
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -27,6 +28,9 @@ pub enum Error {
 
     #[error("session data is corrupted: {0}")]
     CorruptedSessionData(String),
+
+    #[error("session is not bound")]
+    SessionNotBound,
 }
 
 // Session represents the state of a client connection in a frontend server.
@@ -88,35 +92,105 @@ impl Session {
         }
     }
 
+    /// Checks whether the session is bound.
+    pub fn is_bound(&self) -> bool {
+        !self.uid.is_empty()
+    }
+
+    /// Pushes a JSON encoded message to the connected client on the given session.
+    ///
+    /// The session has to be bound in order for the push to work.
     pub async fn push_json_msg(
         &self,
-        _route: impl ToString,
-        _msg: impl serde::Serialize,
+        route: impl ToString,
+        msg: impl serde::Serialize,
     ) -> Result<(), Error> {
-        todo!()
+        if !self.is_bound() {
+            return Err(Error::SessionNotBound);
+        }
+
+        self.push(protos::Push {
+            route: route.to_string(),
+            uid: self.uid.clone(),
+            data: serde_json::to_vec(&msg).expect("serialize should not fail"),
+        })
+        .await
     }
 
+    /// Pushes a protobuf encoded message to the connected client on the given session.
+    ///
+    /// The session has to be bound in order for the push to work.
     pub async fn push_protobuf_msg(
         &self,
-        _route: impl ToString,
-        _msg: impl prost::Message,
+        route: impl ToString,
+        msg: impl prost::Message,
     ) -> Result<(), Error> {
-        todo!()
+        if !self.is_bound() {
+            return Err(Error::SessionNotBound);
+        }
+
+        self.push(protos::Push {
+            route: route.to_string(),
+            uid: self.uid.clone(),
+            data: utils::encode_proto(&msg),
+        })
+        .await
     }
 
-    pub async fn push_raw_msg(&self, _route: impl ToString, _msg: Vec<u8>) -> Result<(), Error> {
-        todo!()
+    async fn push(&self, push_msg: protos::Push) -> Result<(), Error> {
+        let frontend_server = match self
+            .discovery
+            .lock()
+            .await
+            .server_by_id(
+                &self.frontend_id,
+                // TODO(lhahn): this is not efficient. Ideallly we should know the server
+                // type here, instead of providing None.
+                None,
+            )
+            .await?
+        {
+            Some(s) => s,
+            None => {
+                error!(self.logger, "cannot bind session to unexistent frontend server"; "server_id" => %self.frontend_id.0);
+                return Err(Error::Cluster(cluster::Error::FrontendServerNotFound(
+                    self.frontend_id.clone(),
+                )));
+            }
+        };
+
+        let _ = self
+            .rpc_client
+            .push_to_user(frontend_server.kind.clone(), push_msg)
+            .await?;
+
+        Ok(())
     }
 
     pub async fn kick(&self) -> Result<(), Error> {
-        todo!()
+        if self.uid.is_empty() {
+            return Err(Error::SessionNotBound);
+        }
+
+        let buf = utils::encode_proto(&protos::KickMsg {
+            user_id: self.uid.clone(),
+        });
+
+        self.send_request_to_frontend(KICK_ROUTE, buf).await
     }
 
     pub async fn update_in_front(&self) -> Result<(), Error> {
         if self.is_frontend {
             return Err(Error::FrontendSession);
         }
-        self.send_request_to_frontend(SESSION_PUSH_ROUTE, true)
+
+        let session_data = utils::encode_proto(&protos::Session {
+            id: self.frontend_session_id,
+            uid: self.uid.to_string(),
+            data: serde_json::to_vec(&self.data).expect("should not fail encoding"),
+        });
+
+        self.send_request_to_frontend(SESSION_PUSH_ROUTE, session_data)
             .await
     }
 
@@ -125,7 +199,15 @@ impl Session {
             return Err(Error::AlreadyBound);
         }
         self.uid = uid.to_string();
-        self.send_request_to_frontend(BIND_ROUTE, false).await
+
+        let session_data = utils::encode_proto(&protos::Session {
+            id: self.frontend_session_id,
+            uid: self.uid.to_string(),
+            data: vec![],
+        });
+
+        self.send_request_to_frontend(BIND_ROUTE, session_data)
+            .await
     }
 
     pub fn set(&mut self, key: impl ToString, value: impl serde::Serialize) {
@@ -141,17 +223,7 @@ impl Session {
         }
     }
 
-    async fn send_request_to_frontend(&self, route: &str, include_data: bool) -> Result<(), Error> {
-        let session_data = protos::Session {
-            id: self.frontend_session_id,
-            uid: self.uid.to_string(),
-            data: if include_data {
-                serde_json::to_vec(&self.data).expect("serialization should not fail")
-            } else {
-                vec![]
-            },
-        };
-
+    async fn send_request_to_frontend(&self, route: &str, data: Vec<u8>) -> Result<(), Error> {
         let frontend_server = match self
             .discovery
             .lock()
@@ -180,11 +252,9 @@ impl Session {
                 protos::RpcType::User,
                 message::Message {
                     kind: message::Kind::Request,
-                    id: 0,
                     route: route.to_owned(),
-                    data: utils::encode_proto(&session_data),
-                    compressed: false,
-                    err: false,
+                    data,
+                    ..Default::default()
                 },
                 frontend_server,
             )

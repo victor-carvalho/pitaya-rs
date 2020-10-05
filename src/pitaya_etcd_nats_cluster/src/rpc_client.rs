@@ -154,8 +154,6 @@ impl RpcClient for NatsRpcClient {
 
     async fn push_to_user(
         &self,
-        // NOTE: we ignore the server id, since it is not necessary to create the topic.
-        _server_id: ServerId,
         server_kind: ServerKind,
         push_msg: protos::Push,
     ) -> Result<(), Error> {
@@ -175,14 +173,12 @@ impl RpcClient for NatsRpcClient {
             return Err(Error::EmptyServerKind);
         }
 
-        let request_timeout = self.settings.request_timeout;
         let res = tokio::task::spawn_blocking(move || -> Result<(), Error> {
             let topic = utils::user_messages_topic(&push_msg.uid, &server_kind);
             let push_buffer = utils::encode_proto(&push_msg);
 
-            // TODO(lhahn): should we handle the returned message here somehow?
-            let _message = connection
-                .request_timeout(&topic, push_buffer, request_timeout)
+            connection
+                .publish(&topic, push_buffer)
                 .map_err(Error::Nats)?;
 
             Ok(())
