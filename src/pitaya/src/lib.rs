@@ -640,10 +640,7 @@ impl<'a> PitayaBuilder<'a> {
             .await?,
         )));
 
-        if !self
-            .container
-            .set::<metrics::ThreadSafeReporter>(metrics_reporter.clone())
-        {
+        if !self.container.set(metrics_reporter.clone()) {
             panic!("should not fail to set metrics reporter state");
         }
 
