@@ -12,7 +12,9 @@ namespace exampleapp.Handlers
     {
         public async Task<MyResponse> Entry(PitayaSession session, RPCMsg msg)
         {
-            await NPitaya.PitayaCluster.IncCounter("super_metric");
+            await NPitaya.PitayaCluster.IncCounter("super_metric", new string[] {
+                "false",
+            });
 
             try
             {

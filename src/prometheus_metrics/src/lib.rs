@@ -135,9 +135,9 @@ impl Reporter for PrometheusReporter {
         Ok(())
     }
 
-    fn inc_counter(&self, name: &str) -> Result<(), Error> {
+    fn inc_counter(&self, name: &str, labels: &[&str]) -> Result<(), Error> {
         if let Some(counter) = self.counters.get(name) {
-            counter.with_label_values(&[]).inc();
+            counter.with_label_values(labels).inc();
             Ok(())
         } else {
             Err(Error::InvalidMetric(format!(

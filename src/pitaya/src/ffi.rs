@@ -807,15 +807,24 @@ pub extern "C" fn pitaya_send_push_to_user(
 pub extern "C" fn pitaya_metrics_inc_counter(
     p: *mut Pitaya,
     name: *mut c_char,
+    labels: *mut *mut c_char,
+    labels_count: u32,
     callback: extern "C" fn(*mut c_void),
     user_data: *mut c_void,
 ) {
     let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
     let name = unsafe { c_string_to_string(name) };
+    let labels: Vec<String> = unsafe {
+        slice::from_raw_parts(labels, labels_count as usize)
+            .iter()
+            .map(|c_str| c_string_to_string(*c_str))
+            .collect()
+    };
     let user_data = PitayaUserData(user_data);
     let pitaya_server = p.pitaya_server.clone();
     p.runtime.spawn(async move {
-        pitaya_server.inc_counter(&name).await;
+        let labels_ref: Vec<&str> = labels.iter().map(|l| l.as_str()).collect();
+        pitaya_server.inc_counter(&name, &labels_ref[..]).await;
         callback(user_data.0);
     });
 }
@@ -826,14 +835,14 @@ pub extern "C" fn pitaya_metrics_observe_hist(
     name: *mut c_char,
     value: f64,
     labels: *mut *mut c_char,
-    labels_count: usize,
+    labels_count: u32,
     callback: extern "C" fn(*mut c_void),
     user_data: *mut c_void,
 ) {
     let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
     let name = unsafe { c_string_to_string(name) };
     let labels: Vec<String> = unsafe {
-        slice::from_raw_parts(labels, labels_count)
+        slice::from_raw_parts(labels, labels_count as usize)
             .iter()
             .map(|c_str| c_string_to_string(*c_str))
             .collect()

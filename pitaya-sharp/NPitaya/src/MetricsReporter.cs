@@ -13,7 +13,7 @@ namespace NPitaya
             _pitaya = pitaya;
         }
 
-        internal Task IncCounter(string name)
+        internal Task IncCounter(string name, string[] labels)
         {
             return Task.Run(() =>
             {
@@ -24,6 +24,8 @@ namespace NPitaya
                 PitayaCluster.pitaya_metrics_inc_counter(
                     _pitaya,
                     name,
+                    labels,
+                    (UInt32)labels.Length,
                     callback,
                     GCHandle.ToIntPtr(handle)
                 );

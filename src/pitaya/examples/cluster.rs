@@ -88,7 +88,7 @@ async fn bind(
         println!("failed to bind session: {}", e);
     }
 
-    if let Err(e) = reporter.read().await.inc_counter("my_metric") {
+    if let Err(e) = reporter.read().await.inc_counter("my_metric", &["false"]) {
         println!("failed to increment counter: {}", e);
     }
 
@@ -142,7 +142,7 @@ async fn main() {
             subsystem: "room".to_owned(),
             name: "my_metric".to_owned(),
             help: "my metric help string".to_owned(),
-            variable_labels: vec![],
+            variable_labels: vec!["error".to_owned()],
             buckets: vec![],
         }])
         // .with_server_handlers(pitaya::handlers![room::entry])
