@@ -95,13 +95,18 @@ PitayaError *pitaya_initialize_with_nats(void *user_ctx,
                                          PitayaCustomMetrics *custom_metrics,
                                          Pitaya **pitaya);
 
-void pitaya_metrics_inc_counter(Pitaya *p, char *name, void (*callback)(void*), void *user_data);
+void pitaya_metrics_inc_counter(Pitaya *p,
+                                char *name,
+                                char **labels,
+                                uint32_t labels_count,
+                                void (*callback)(void*),
+                                void *user_data);
 
 void pitaya_metrics_observe_hist(Pitaya *p,
                                  char *name,
                                  double value,
                                  char **labels,
-                                 uintptr_t labels_count,
+                                 uint32_t labels_count,
                                  void (*callback)(void*),
                                  void *user_data);
 

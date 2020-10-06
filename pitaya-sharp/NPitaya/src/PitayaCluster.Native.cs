@@ -182,6 +182,8 @@ namespace NPitaya
         internal static extern void pitaya_metrics_inc_counter(
             IntPtr pitaya,
             string name,
+            string[] labels,
+            UInt32 labelsCount,
             NoErrorCallback callback,
             IntPtr userData
         );

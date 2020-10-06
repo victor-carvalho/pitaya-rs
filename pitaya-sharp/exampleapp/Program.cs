@@ -33,7 +33,7 @@ namespace PitayaCSharpExample
                 subsystem: "random_subsystem",
                 name: "super_metric",
                 help: "this metric is amazing man",
-                variableLabels: new string[] { }
+                variableLabels: new string[] { "error" }
             );
 
             try

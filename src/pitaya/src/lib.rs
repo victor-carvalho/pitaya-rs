@@ -438,8 +438,8 @@ impl Pitaya {
         Ok(())
     }
 
-    pub async fn inc_counter(&self, name: &str) {
-        if let Err(e) = self.metrics_reporter.read().await.inc_counter(name) {
+    pub async fn inc_counter(&self, name: &str, labels: &[&str]) {
+        if let Err(e) = self.metrics_reporter.read().await.inc_counter(name, labels) {
             warn!(self.logger, "failed to increment counter"; "name" => name, "error" => %e);
         }
     }

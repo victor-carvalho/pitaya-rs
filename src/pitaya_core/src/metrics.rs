@@ -31,7 +31,7 @@ pub trait Reporter {
     async fn start(&mut self) -> Result<(), Error>;
     async fn shutdown(&mut self) -> Result<(), Error>;
 
-    fn inc_counter(&self, name: &str) -> Result<(), Error>;
+    fn inc_counter(&self, name: &str, labels: &[&str]) -> Result<(), Error>;
     fn observe_hist(&self, name: &str, value: f64, labels: &[&str]) -> Result<(), Error>;
 }
 
@@ -55,7 +55,7 @@ impl Reporter for DummyReporter {
         Ok(())
     }
 
-    fn inc_counter(&self, _name: &str) -> Result<(), Error> {
+    fn inc_counter(&self, _name: &str, _labels: &[&str]) -> Result<(), Error> {
         Ok(())
     }
 
