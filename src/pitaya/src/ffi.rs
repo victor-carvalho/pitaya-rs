@@ -812,12 +812,10 @@ pub extern "C" fn pitaya_metrics_inc_counter(
 ) {
     let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
     let name = unsafe { c_string_to_string(name) };
-    println!("incrementing counter named {}!", name);
     let user_data = PitayaUserData(user_data);
     let pitaya_server = p.pitaya_server.clone();
     p.runtime.spawn(async move {
         pitaya_server.inc_counter(&name).await;
-        println!("calling callback!");
         callback(user_data.0);
     });
 }
