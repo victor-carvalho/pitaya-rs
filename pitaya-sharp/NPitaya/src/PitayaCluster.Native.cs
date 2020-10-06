@@ -30,6 +30,8 @@ namespace NPitaya
         private delegate void ClusterNotificationCallbackFunc(IntPtr userData, NotificationType notificationType, IntPtr data);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate void FinishCallback(IntPtr userData, IntPtr errorMsg);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void NoErrorCallback(IntPtr userData);
 
         private const string LibName = "libpitaya";
 
@@ -176,7 +178,23 @@ namespace NPitaya
             UInt32 variableLabelsCount
         );
 
-        // TODO: inc counter
-        // TODO: observe histogram
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pitaya_metrics_inc_counter(
+            IntPtr pitaya,
+            string name,
+            NoErrorCallback callback,
+            IntPtr userData
+        );
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pitaya_metrics_observe_hist(
+            IntPtr pitaya,
+            string name,
+            double value,
+            string[] labels,
+            UInt32 labelsCount,
+            NoErrorCallback callback,
+            IntPtr userData
+        );
     }
 }
