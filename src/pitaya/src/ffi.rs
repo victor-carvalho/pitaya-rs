@@ -810,7 +810,7 @@ pub extern "C" fn pitaya_metrics_inc_counter(
     callback: extern "C" fn(*mut c_void),
     user_data: *mut c_void,
 ) {
-    let p = unsafe { Box::from_raw(p) };
+    let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
     let name = unsafe { c_string_to_string(name) };
     let user_data = PitayaUserData(user_data);
     let pitaya_server = p.pitaya_server.clone();
@@ -830,7 +830,7 @@ pub extern "C" fn pitaya_metrics_observe_hist(
     callback: extern "C" fn(*mut c_void),
     user_data: *mut c_void,
 ) {
-    let p = unsafe { Box::from_raw(p) };
+    let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
     let name = unsafe { c_string_to_string(name) };
     let labels: Vec<String> = unsafe {
         slice::from_raw_parts(labels, labels_count)

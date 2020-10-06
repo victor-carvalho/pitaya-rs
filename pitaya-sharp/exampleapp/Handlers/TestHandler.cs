@@ -12,6 +12,8 @@ namespace exampleapp.Handlers
     {
         public async Task<MyResponse> Entry(PitayaSession session, RPCMsg msg)
         {
+            await NPitaya.PitayaCluster.IncCounter("super_metric");
+
             try
             {
                 await session.Bind("CSHARP_UID");

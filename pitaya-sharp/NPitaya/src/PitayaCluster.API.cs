@@ -30,6 +30,7 @@ namespace NPitaya
         private static RpcClient _rpcClient;
 
         private static Action _onSignalEvent;
+        private static MetricsReporter _metricsReporter;
 
         public enum ServiceDiscoveryAction
         {
@@ -133,6 +134,7 @@ namespace NPitaya
             }
 
             _rpcClient = new RpcClient(pitaya);
+            _metricsReporter = new MetricsReporter(pitaya);
         }
 
         static void LogFunctionCallback(IntPtr ctx, IntPtr msg)
@@ -284,6 +286,16 @@ namespace NPitaya
         public static Task<T> Rpc<T>(Route route, object msg)
         {
             return Rpc<T>("", route, msg);
+        }
+
+        public static Task IncCounter(string name)
+        {
+            return _metricsReporter.IncCounter(name);
+        }
+
+        public static Task ObserveHist(string name, double value, string[] labels)
+        {
+            return _metricsReporter.ObserveHist(name, value, labels);
         }
 
         private static void OnServerAddedOrRemovedNativeCb(int serverAdded, IntPtr serverPtr, IntPtr user)
