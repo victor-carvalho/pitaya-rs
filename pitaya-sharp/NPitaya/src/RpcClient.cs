@@ -14,9 +14,10 @@ namespace NPitaya
         IntPtr _pitaya;
         ISerializer _serializer;
 
-        public RpcClient(IntPtr pitaya)
+        public RpcClient(IntPtr pitaya, ISerializer serializer)
         {
             _pitaya = pitaya;
+            _serializer = serializer;
         }
 
         public Task<T> Rpc<T>(string serverId, Route route, object msg)

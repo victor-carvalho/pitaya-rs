@@ -93,6 +93,7 @@ PitayaError *pitaya_initialize_with_nats(void *user_ctx,
                                          void (*log_function)(void*, char*),
                                          void *log_ctx,
                                          PitayaCustomMetrics *custom_metrics,
+                                         PitayaServerInfo *server_info,
                                          Pitaya **pitaya);
 
 void pitaya_metrics_inc_counter(Pitaya *p,

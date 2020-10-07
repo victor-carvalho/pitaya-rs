@@ -41,6 +41,13 @@ namespace PitayaCSharpExample
                 PitayaCluster.Initialize(
                     "CSHARP",
                     "csharp.toml",
+                    new Server(
+                        id: "c#-id",
+                        kind: "random-server-kind",
+                        metadata: "{}",
+                        hostname: "ololo",
+                        frontend: true
+                    ),
                     NativeLogLevel.Debug,
                     NativeLogKind.Console,
                     (msg) =>

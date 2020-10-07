@@ -51,9 +51,6 @@ pub struct Settings {
     // NATS related settings.
     pub nats: pitaya_etcd_nats_cluster::settings::Nats,
 
-    // The kind of this server. For example, "metagame" to represent a metagame server.
-    pub server_kind: String,
-
     // Metrics related settings.
     pub metrics: Metrics,
 }
@@ -65,7 +62,6 @@ impl Default for Settings {
             shutdown_timeout: constants::DEFAULT_SHUTDOWN_TIMEOUT,
             etcd: Default::default(),
             nats: Default::default(),
-            server_kind: constants::DEFAULT_SERVER_KIND.to_owned(),
             metrics: Default::default(),
         }
     }

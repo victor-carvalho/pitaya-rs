@@ -50,6 +50,7 @@ namespace NPitaya
             IntPtr logFunction,
             IntPtr logCtx,
             IntPtr customMetrics,
+            IntPtr serverInfo,
             out IntPtr pitaya);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern void pitaya_shutdown(IntPtr pitaya);

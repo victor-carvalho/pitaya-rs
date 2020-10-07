@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
-using NPitaya.Metrics;
 using NPitaya.Models;
 using NPitaya.Serializer;
 using NPitaya.Protos;
@@ -49,12 +48,10 @@ namespace NPitaya
         }
 
         private static ServiceDiscoveryListener _serviceDiscoveryListener;
-        private static GCHandle _serviceDiscoveryListenerHandle;
 
         public static void AddSignalHandler(Action cb)
         {
             _onSignalEvent += cb;
-            // OnSignalInternal(OnSignal);
         }
 
         private static void OnSignal()
@@ -100,6 +97,7 @@ namespace NPitaya
 
         public static void Initialize(string envPrefix,
                                       string configFile,
+                                      Server serverInfo,
                                       NativeLogLevel logLevel,
                                       NativeLogKind logKind,
                                       Action<string> logFunction,
@@ -123,6 +121,7 @@ namespace NPitaya
                 Marshal.GetFunctionPointerForDelegate(logFunctionCallback),
                 GCHandle.ToIntPtr(logCtx),
                 customMetrics == null ? IntPtr.Zero : customMetrics.Ptr,
+                serverInfo.Handle,
                 out pitaya
             );
 
@@ -133,7 +132,7 @@ namespace NPitaya
                 throw new PitayaException($"Initialization failed: code={pitayaError.Code} msg={pitayaError.Message}");
             }
 
-            _rpcClient = new RpcClient(pitaya);
+            _rpcClient = new RpcClient(pitaya, _serializer);
             _metricsReporter = new MetricsReporter(pitaya);
         }
 
@@ -219,7 +218,6 @@ namespace NPitaya
         {
             pitaya_shutdown(pitaya);
             pitaya = IntPtr.Zero;
-            MetricsReporters.Terminate();
         }
 
         class ServerIdContext
