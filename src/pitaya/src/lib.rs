@@ -17,7 +17,7 @@ use pitaya_core::{
 pub use pitaya_etcd_nats_cluster::{EtcdLazy, NatsRpcClient, NatsRpcServer};
 pub use pitaya_macros::{handlers, json_handler, protobuf_handler};
 use slog::{debug, error, info, o, trace, warn};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tokio::{
     sync::{broadcast, mpsc, oneshot, Mutex, RwLock},
     task,
@@ -80,7 +80,7 @@ impl Pitaya {
         rpc_dispatch: service::RpcDispatch,
         container: Arc<state::Container>,
     ) -> Result<Self, Error> {
-        if settings.server_kind.trim().is_empty() {
+        if server_info.kind.0.is_empty() {
             return Err(Error::InvalidServerKind);
         }
 
@@ -472,6 +472,7 @@ pub struct PitayaBuilder<'a> {
     server_handlers: handler::Handlers,
     container: state::Container,
     metrics: Vec<metrics::Opts>,
+    server_info: Option<Arc<ServerInfo>>,
 }
 
 impl<'a> Default for PitayaBuilder<'a> {
@@ -495,7 +496,14 @@ impl<'a> PitayaBuilder<'a> {
             server_handlers: handler::Handlers::new(),
             container: state::Container::new(),
             metrics: Vec::new(),
+            server_info: None,
         }
+    }
+
+    /// Specify the Pitaya server information.
+    pub fn with_server_info(mut self, server_info: Arc<ServerInfo>) -> Self {
+        self.server_info.replace(server_info);
+        self
     }
 
     /// Specify the root logger for the Pitaya instance.
@@ -592,6 +600,10 @@ impl<'a> PitayaBuilder<'a> {
             panic!("either client and server handlers should be defined or an RPC handler should be provided");
         }
 
+        if self.server_info.is_none() {
+            panic!("you need to provide a server info (see .with_server_info)");
+        }
+
         let logger = self
             .logger
             .expect("a logger should be passed to PitayaBuilder");
@@ -599,15 +611,7 @@ impl<'a> PitayaBuilder<'a> {
             settings::Settings::merge(self.base_settings, self.env_prefix, self.config_file)?;
         let etcd_settings = Arc::new(settings.etcd.clone());
         let nats_settings = Arc::new(settings.nats.clone());
-        let server_id = uuid::Uuid::new_v4().to_string();
-        let server_info = Arc::new(ServerInfo {
-            id: ServerId(server_id),
-            kind: ServerKind::from(&settings.server_kind),
-            // TODO(lhahn): fill these options.
-            metadata: HashMap::new(),
-            hostname: "".to_owned(),
-            frontend: self.frontend,
-        });
+        let server_info = self.server_info.expect("server_info should not be None");
 
         let metrics_reporter: metrics::ThreadSafeReporter = if settings.metrics.enabled {
             let metrics_addr =

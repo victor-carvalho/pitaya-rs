@@ -3,6 +3,8 @@ use pitaya_core::Route;
 use prost::Message;
 use slog::{error, o, Drain};
 use std::{
+    collections::HashMap,
+    convert::TryInto,
     ffi::{c_void, CStr, CString},
     mem,
     os::raw::c_char,
@@ -137,8 +139,8 @@ pub struct PitayaServerInfo {
     frontend: i32,
 }
 
-impl PitayaServerInfo {
-    fn new(server: Arc<crate::ServerInfo>) -> Self {
+impl From<Arc<crate::ServerInfo>> for PitayaServerInfo {
+    fn from(server: Arc<crate::ServerInfo>) -> Self {
         let metadata = serde_json::to_string(&server.metadata)
             .expect("should not fail to convert hashmap to json string");
         Self {
@@ -152,6 +154,26 @@ impl PitayaServerInfo {
                 .expect("should not fail to convert rust string to c string"),
             frontend: server.frontend as i32,
         }
+    }
+}
+
+pub struct InvalidServerMetadata;
+
+impl std::convert::TryInto<crate::ServerInfo> for &PitayaServerInfo {
+    type Error = InvalidServerMetadata;
+
+    fn try_into(self) -> Result<crate::ServerInfo, Self::Error> {
+        let metadata: HashMap<String, String> =
+            serde_json::from_str(&self.metadata.to_string_lossy())
+                .map_err(|_| InvalidServerMetadata)?;
+
+        Ok(crate::ServerInfo {
+            frontend: self.frontend != 0,
+            hostname: self.hostname.to_string_lossy().to_string(),
+            id: ServerId::from(self.id.to_string_lossy().to_string()),
+            kind: ServerKind::from(self.kind.to_string_lossy().to_string()),
+            metadata,
+        })
     }
 }
 
@@ -357,7 +379,7 @@ pub extern "C" fn pitaya_server_by_id(
             .await
         {
             Ok(Some(sv)) => {
-                let sv = Box::into_raw(Box::new(PitayaServerInfo::new(sv)));
+                let sv = Box::into_raw(Box::new(PitayaServerInfo::from(sv)));
                 callback(user_data.0, sv);
             }
             Ok(None) => {
@@ -472,6 +494,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
     log_function: extern "C" fn(*mut c_void, *mut c_char),
     log_ctx: *mut c_void,
     custom_metrics: *mut PitayaCustomMetrics,
+    server_info: *mut PitayaServerInfo,
     pitaya: *mut *mut Pitaya,
 ) -> *mut PitayaError {
     assert!(!env_prefix.is_null());
@@ -514,10 +537,21 @@ pub extern "C" fn pitaya_initialize_with_nats(
 
     let mut runtime = tokio::runtime::Runtime::new().expect("should not fail to create a runtime");
 
+    let server_info: crate::ServerInfo = match unsafe { (&*server_info).try_into() } {
+        Ok(s) => s,
+        Err(InvalidServerMetadata) => {
+            return Box::into_raw(Box::new(PitayaError::new(
+                "PIT-400",
+                "invalid server metadata (has to be a HashMap<String, String>)",
+            )));
+        }
+    };
+
     let res = runtime.block_on(async move {
         PitayaBuilder::new()
             .with_env_prefix(&env_prefix.to_string_lossy())
             .with_config_file(&config_file.to_string_lossy())
+            .with_server_info(server_info.into())
             .with_logger(root_logger)
             .with_rpc_handler(Box::new(move |ctx, _session, rpc| {
                 let request_buffer = utils::encode_proto(rpc.request());
@@ -531,7 +565,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
             .with_cluster_subscriber({
                 move |notification| match notification {
                     cluster::Notification::ServerAdded(server) => {
-                        let raw_server = Box::into_raw(Box::new(PitayaServerInfo::new(server)));
+                        let raw_server = Box::into_raw(Box::new(PitayaServerInfo::from(server)));
                         cluster_notification_callback(
                             user_ctx.0,
                             PitayaClusterNotification::ServerAdded,
@@ -539,7 +573,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
                         );
                     }
                     cluster::Notification::ServerRemoved(server) => {
-                        let raw_server = Box::into_raw(Box::new(PitayaServerInfo::new(server)));
+                        let raw_server = Box::into_raw(Box::new(PitayaServerInfo::from(server)));
                         cluster_notification_callback(
                             user_ctx.0,
                             PitayaClusterNotification::ServerRemoved,
