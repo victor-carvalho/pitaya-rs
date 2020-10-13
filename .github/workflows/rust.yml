@@ -56,6 +56,9 @@ jobs:
       - name: Install Rust
         run: rustup update stable
 
+      - name: Install fmt
+        run: rustup component add rustfmt
+
       - name: Build Pitaya
         run: cargo build --release
 
