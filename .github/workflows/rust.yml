@@ -129,6 +129,9 @@ jobs:
     name: Create NuPkg
     runs-on: ubuntu-latest
     needs:
+      - test
+      - lint
+      - docs
       - build-linux
       - build-mac
     steps:
@@ -137,10 +140,21 @@ jobs:
         with:
           name: libpitaya.so
           path: target/release
+
       # Download Libnux binary
       - uses: actions/download-artifact@v2
         with:
           name: libpitaya.dylib
           path: target/release
 
+      - name: "build c#"
+        run: |
+          cd pitaya-sharp/NPitaya
+          dotnet build -c Release
+          dotnet pack -C Release
 
+      - name: Upload NuPkg
+        uses: actions/upload-artifact@v2
+        with:
+          name: NPitaya.0.12.0.nupkg
+          path: pitaya-sharp/NPitaya/bin/Release/NPitaya.0.12.0.nupkg
