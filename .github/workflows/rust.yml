@@ -125,7 +125,7 @@ jobs:
           RUSTDOCFLAGS: --cfg docsrs
 
   nupkg:
-    name: Create NuPkg
+    name: create nupkg
     runs-on: ubuntu-latest
     needs:
       - test
@@ -148,6 +148,8 @@ jobs:
 
       - name: "build c#"
         run: |
+          pwd
+          ls
           cd pitaya-sharp/NPitaya
           dotnet build -c Release
           dotnet pack -C Release
