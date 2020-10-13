@@ -1,3 +1,5 @@
+[![Actions Status](https://github.com/tfgco/pitaya-rs/workflows/Rust/badge.svg)](https://github.com/tfgco/pitaya-rs/actions)
+
 # Overview
 pitaya-rs attemps to recreate [Pitaya](https://github.com/topfreegames/pitaya) in Rust, with the objective of leveraging a common C API in order to create Pitaya servers in multiple languages. By leveraging the stable architecture that is already used by the project, we can expand its reach into different languages other than Go.
 
