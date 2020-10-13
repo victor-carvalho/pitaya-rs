@@ -150,6 +150,7 @@ jobs:
         run: |
           pwd
           ls
+          ls target
           cd pitaya-sharp/NPitaya
           dotnet build -c Release
           dotnet pack -C Release
