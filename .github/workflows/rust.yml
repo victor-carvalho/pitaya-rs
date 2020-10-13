@@ -56,6 +56,9 @@ jobs:
       - name: Install Rust
         run: rustup update stable
 
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+
       - name: Build Pitaya
         run: cargo build --release
 
@@ -68,11 +71,6 @@ jobs:
   build-linux:
     name: build pitaya for linux
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
     steps:
       - uses: actions/checkout@v2
         with:
