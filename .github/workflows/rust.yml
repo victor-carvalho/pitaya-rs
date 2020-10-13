@@ -137,9 +137,9 @@ jobs:
           pwd
           ls
           ls target
-          cd pitaya-sharp/NPitaya
-          dotnet build -c Release
-          dotnet pack -C Release
+          ls release
+          cd pitaya-sharp
+          make pack
 
       - name: Upload NuPkg
         uses: actions/upload-artifact@v2

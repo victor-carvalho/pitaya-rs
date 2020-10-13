@@ -8,5 +8,19 @@ test: start-test-deps
 	@dotnet test NPitaya.Tests
 	@$(MAKE) stop-test-deps
 
-build:
+.PHONY: clean
+clean:
+	@dotnet clean NPitaya
+	@rm -rf NPitaya/bin/Release
+
+.PHONY: build
+build: clean
 	@dotnet build NPitaya --configuration Release
+
+.PHONY: pack
+pack: build
+	@dotnet pack NPitaya --configuration Release
+
+.PHONY: push
+push: pack
+	@dotnet nuget push NPitaya/bin/Release/*.nupkg -k $(NUGET_API_KEY) -s https://api.nuget.org/v3/index.json
