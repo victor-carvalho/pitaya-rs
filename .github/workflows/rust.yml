@@ -19,7 +19,8 @@ jobs:
       - test
       - lint
       - docs
-      - build
+      - build-mac
+      - build-linux
       - nupkg
     steps:
       - run: exit 0
