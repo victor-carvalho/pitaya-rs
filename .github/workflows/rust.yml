@@ -18,7 +18,6 @@ jobs:
     needs:
       - test
       - lint
-      - docs
       - build-mac
       - build-linux
       - nupkg
@@ -108,29 +107,12 @@ jobs:
       - name: "clippy --all"
         run: cargo clippy --all --tests
 
-  docs:
-    name: docs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: true
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: "doc --lib --all-features"
-        run: cargo doc --lib --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: --cfg docsrs
-
   nupkg:
     name: create nupkg
     runs-on: ubuntu-latest
     needs:
       - test
       - lint
-      - docs
       - build-linux
       - build-mac
     steps:
