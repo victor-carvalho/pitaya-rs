@@ -44,7 +44,7 @@ jobs:
           makers deps
           cargo test
           makers undeps
-    
+
   build-mac:
     name: build pitaya for mac
     runs-on: macos-latest
@@ -55,9 +55,6 @@ jobs:
 
       - name: Install Rust
         run: rustup update stable
-
-      - name: Install rustfmt
-        run: rustup component add rustfmt
 
       - name: Build Pitaya
         run: cargo build --release
