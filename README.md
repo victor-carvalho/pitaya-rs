@@ -3,6 +3,8 @@
 # Overview
 pitaya-rs attemps to recreate [Pitaya](https://github.com/topfreegames/pitaya) in Rust, with the objective of leveraging a common C API in order to create Pitaya servers in multiple languages. By leveraging the stable architecture that is already used by the project, we can expand its reach into different languages other than Go.
 
+You can find the C# implementation [here](./pitaya-sharp/README.md).
+
 # Requirements
 The library needs to be build with the minimum Rust version of 1.46. Also, the library
 uses ETCD and NATS for implementing service discovery and RPC communication between servers.
