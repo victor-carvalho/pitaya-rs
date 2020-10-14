@@ -4,7 +4,7 @@
     <PropertyGroup>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <PackageId>NPitaya</PackageId>
-        <PackageVersion>0.12.0</PackageVersion>
+        <PackageVersion>0.12.4</PackageVersion>
         <Title>NPitaya</Title>
         <Authors>TFG Co</Authors>
         <Description>A full implementation of pitaya backend framework for .NET</Description>
@@ -22,17 +22,19 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Protobuf CompileOutputs="false" Include="../../pitaya-protos/*.proto" OutputDir="./src/gen" PrivateAssets="All" />
+        <Protobuf CompileOutputs="false" Include="../../pitaya-protos/*.proto" OutputDir="./src/gen" PrivateAssets="All" />
     </ItemGroup>
 
     <ItemGroup>
-        <Content Include="../../target/release/libpitaya.*">
-            <PackagePath>\</PackagePath>
-            <Pack>true</Pack>
+        <!-- Copy the native libraries to the .nupkg so that they are included on the project that imports NPitaya -->
+        <Content Include="../../target/release/libpitaya.so">
+            <PackagePath>runtimes/linux-x64/native</PackagePath>
+        </Content>
+        <Content Include="../../target/release/libpitaya.dylib">
+            <PackagePath>runtimes/osx-x64/native</PackagePath>
         </Content>
         <Content Include="../unity-metas/*.meta">
             <PackagePath>\</PackagePath>
-            <Pack>true</Pack>
         </Content>
     </ItemGroup>
 
