@@ -143,5 +143,5 @@ jobs:
       - name: Upload NuPkg
         uses: actions/upload-artifact@v2
         with:
-          name: NPitaya.0.12.4.nupkg
-          path: pitaya-sharp/NPitaya/bin/Release/NPitaya.0.12.4.nupkg
+          name: NPitaya
+          path: pitaya-sharp/NPitaya/bin/Release/*.nupkg
