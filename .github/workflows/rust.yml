@@ -11,19 +11,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Depends on all action sthat are required for a "successful" CI run.
-  tests-pass:
-    name: all jobs pass
-    runs-on: ubuntu-latest
-    needs:
-      - test
-      - lint
-      - build-mac
-      - build-linux
-      - nupkg
-    steps:
-      - run: exit 0
-
   test:
     name: test pitaya
     runs-on: ubuntu-latest
@@ -61,11 +48,17 @@ jobs:
       - name: Build Pitaya
         run: cargo build --release
 
+      # We have to tar the artifact before upload, otherwise we'll lose 
+      # permissions of the executable when downloading the artifact again.
+      # Ref: https://github.com/actions/download-artifact#maintaining-file-permissions-and-case-sensitive-files
+      - name: Tar Build Artifact
+        run: tar -cvf libpitaya.dylib.tar target/release/libpitaya.dylib
+
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: libpitaya.dylib
-          path: target/release/libpitaya.dylib
+          name: libpitaya.dylib.tar
+          path: libpitaya.dylib.tar
 
   build-linux:
     name: build pitaya for linux
@@ -81,14 +74,20 @@ jobs:
       - name: Build Pitaya
         run: cargo build --release
 
+      # We have to tar the artifact before upload, otherwise we'll lose 
+      # permissions of the executable when downloading the artifact again.
+      # Ref: https://github.com/actions/download-artifact#maintaining-file-permissions-and-case-sensitive-files
+      - name: Tar Build Artifact
+        run: tar -cvf libpitaya.so.tar target/release/libpitaya.so
+
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: libpitaya.so
-          path: target/release/libpitaya.so
+          name: libpitaya.so.tar
+          path: libpitaya.so.tar
 
   lint:
-    name: clippy
+    name: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -123,14 +122,18 @@ jobs:
       # Download Mac binary
       - uses: actions/download-artifact@v2
         with:
-          name: libpitaya.so
-          path: target/release
+          name: libpitaya.so.tar
 
       # Download Libnux binary
       - uses: actions/download-artifact@v2
         with:
-          name: libpitaya.dylib
-          path: target/release
+          name: libpitaya.dylib.tar
+        
+      # Open Mac and Linux archives
+      - name: "open mac and linux archives"
+        run: |
+          tar -xvf libpitaya.dylib.tar
+          tar -xvf libpitaya.so.tar
 
       - name: "build c#"
         run: |
@@ -140,5 +143,5 @@ jobs:
       - name: Upload NuPkg
         uses: actions/upload-artifact@v2
         with:
-          name: NPitaya.0.12.0.nupkg
+          name: NPitaya.0.12.4.nupkg
           path: pitaya-sharp/NPitaya/bin/Release/NPitaya.0.12.4.nupkg
