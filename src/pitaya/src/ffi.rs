@@ -90,6 +90,7 @@ pub extern "C" fn pitaya_custom_metrics_add_hist(
     };
     let buckets = unsafe { slice::from_raw_parts(buckets, buckets_count as usize) };
     let opts = metrics::Opts {
+        kind: metrics::MetricKind::Histogram,
         namespace: unsafe { c_string_to_string(namespace) },
         subsystem: unsafe { c_string_to_string(subsystem) },
         name: unsafe { c_string_to_string(name) },
@@ -118,6 +119,36 @@ pub extern "C" fn pitaya_custom_metrics_add_counter(
             .collect()
     };
     let opts = metrics::Opts {
+        kind: metrics::MetricKind::Counter,
+        namespace: unsafe { c_string_to_string(namespace) },
+        subsystem: unsafe { c_string_to_string(subsystem) },
+        name: unsafe { c_string_to_string(name) },
+        help: unsafe { c_string_to_string(help) },
+        variable_labels,
+        buckets: Vec::new(),
+    };
+    m.metrics.push(opts);
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_custom_metrics_add_gauge(
+    m: *mut PitayaCustomMetrics,
+    namespace: *mut c_char,
+    subsystem: *mut c_char,
+    name: *mut c_char,
+    help: *mut c_char,
+    variable_labels: *mut *mut c_char,
+    variable_labels_count: u32,
+) {
+    let mut m = unsafe { mem::ManuallyDrop::new(Box::from_raw(m)) };
+    let variable_labels: Vec<String> = unsafe {
+        slice::from_raw_parts(variable_labels, variable_labels_count as usize)
+            .iter()
+            .map(|l| c_string_to_string(*l))
+            .collect()
+    };
+    let opts = metrics::Opts {
+        kind: metrics::MetricKind::Gauge,
         namespace: unsafe { c_string_to_string(namespace) },
         subsystem: unsafe { c_string_to_string(subsystem) },
         name: unsafe { c_string_to_string(name) },
@@ -888,6 +919,91 @@ pub extern "C" fn pitaya_metrics_observe_hist(
         pitaya_server
             .observe_hist(&name, value, &labels_ref[..])
             .await;
+        callback(user_data.0);
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_metrics_add_gauge(
+    p: *mut Pitaya,
+    name: *mut c_char,
+    value: f64,
+    labels: *mut *mut c_char,
+    labels_count: u32,
+    callback: extern "C" fn(*mut c_void),
+    user_data: *mut c_void,
+) {
+    let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
+    let name = unsafe { c_string_to_string(name) };
+    let labels: Vec<String> = unsafe {
+        slice::from_raw_parts(labels, labels_count as usize)
+            .iter()
+            .map(|c_str| c_string_to_string(*c_str))
+            .collect()
+    };
+    modify_gauge(
+        p,
+        name,
+        value,
+        GaugeModifier::Add,
+        labels,
+        callback,
+        user_data,
+    );
+}
+
+#[no_mangle]
+pub extern "C" fn pitaya_metrics_set_gauge(
+    p: *mut Pitaya,
+    name: *mut c_char,
+    value: f64,
+    labels: *mut *mut c_char,
+    labels_count: u32,
+    callback: extern "C" fn(*mut c_void),
+    user_data: *mut c_void,
+) {
+    let p = unsafe { mem::ManuallyDrop::new(Box::from_raw(p)) };
+    let name = unsafe { c_string_to_string(name) };
+    let labels: Vec<String> = unsafe {
+        slice::from_raw_parts(labels, labels_count as usize)
+            .iter()
+            .map(|c_str| c_string_to_string(*c_str))
+            .collect()
+    };
+    modify_gauge(
+        p,
+        name,
+        value,
+        GaugeModifier::Set,
+        labels,
+        callback,
+        user_data,
+    );
+}
+
+#[derive(Debug, PartialEq)]
+enum GaugeModifier {
+    Set,
+    Add,
+}
+
+fn modify_gauge(
+    p: mem::ManuallyDrop<Box<Pitaya>>,
+    name: String,
+    value: f64,
+    modifier: GaugeModifier,
+    labels: Vec<String>,
+    callback: extern "C" fn(*mut c_void),
+    user_data: *mut c_void,
+) {
+    let user_data = PitayaUserData(user_data);
+    let pitaya_server = p.pitaya_server.clone();
+    p.runtime.spawn(async move {
+        let labels_ref: Vec<&str> = labels.iter().map(|l| l.as_str()).collect();
+        match modifier {
+            GaugeModifier::Add => pitaya_server.add_gauge(&name, value, &labels_ref[..]).await,
+            GaugeModifier::Set => pitaya_server.set_gauge(&name, value, &labels_ref[..]).await,
+        };
         callback(user_data.0);
     });
 }

@@ -420,19 +420,27 @@ impl Pitaya {
 
     async fn register_metrics(&mut self, metrics: Vec<metrics::Opts>) -> Result<(), Error> {
         for metric in metrics {
-            if !metric.buckets.is_empty() {
-                debug!(self.logger, "registering custom histogram: {}", metric.name);
-                // If we have buckets it means this is a histogram.
-                self.metrics_reporter
-                    .write()
-                    .await
-                    .register_histogram(metric)?;
-            } else {
-                debug!(self.logger, "registering custom counter: {}", metric.name);
-                self.metrics_reporter
-                    .write()
-                    .await
-                    .register_counter(metric)?;
+            match &metric.kind {
+                metrics::MetricKind::Counter => {
+                    debug!(self.logger, "registering counter: {}", metric.name);
+                    self.metrics_reporter
+                        .write()
+                        .await
+                        .register_counter(metric)?;
+                }
+                metrics::MetricKind::Histogram => {
+                    debug!(self.logger, "registering histogram: {}", metric.name);
+                    // If we have buckets it means this is a histogram.
+                    self.metrics_reporter
+                        .write()
+                        .await
+                        .register_histogram(metric)?;
+                }
+                metrics::MetricKind::Gauge => {
+                    debug!(self.logger, "registering gauge: {}", metric.name);
+                    // If we have buckets it means this is a histogram.
+                    self.metrics_reporter.write().await.register_gauge(metric)?;
+                }
             }
         }
         Ok(())
@@ -452,6 +460,28 @@ impl Pitaya {
             .observe_hist(name, value, labels)
         {
             warn!(self.logger, "failed to observe histogram"; "name" => name, "error" => %e);
+        }
+    }
+
+    pub async fn set_gauge(&self, name: &str, value: f64, labels: &[&str]) {
+        if let Err(e) = self
+            .metrics_reporter
+            .read()
+            .await
+            .set_gauge(name, value, labels)
+        {
+            warn!(self.logger, "failed to set gauge value"; "name" => name, "error" => %e);
+        }
+    }
+
+    pub async fn add_gauge(&self, name: &str, value: f64, labels: &[&str]) {
+        if let Err(e) = self
+            .metrics_reporter
+            .read()
+            .await
+            .add_gauge(name, value, labels)
+        {
+            warn!(self.logger, "failed to add value to gauge"; "name" => name, "error" => %e);
         }
     }
 }

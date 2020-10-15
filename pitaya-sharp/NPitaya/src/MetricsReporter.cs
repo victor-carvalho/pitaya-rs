@@ -56,6 +56,50 @@ namespace NPitaya
             });
         }
 
+        internal Task SetGauge(string name, double value, string[] labels)
+        {
+            return Task.Run(() =>
+            {
+                var callback = new PitayaCluster.NoErrorCallback(Callback);
+                var t = new TaskCompletionSource<bool>();
+                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
+
+                PitayaCluster.pitaya_metrics_set_gauge(
+                    _pitaya,
+                    name,
+                    value,
+                    labels,
+                    (UInt32)labels.Length,
+                    callback,
+                    GCHandle.ToIntPtr(handle)
+                );
+
+                return t.Task;
+            });
+        }
+
+        internal Task AddGauge(string name, double value, string[] labels)
+        {
+            return Task.Run(() =>
+            {
+                var callback = new PitayaCluster.NoErrorCallback(Callback);
+                var t = new TaskCompletionSource<bool>();
+                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
+
+                PitayaCluster.pitaya_metrics_add_gauge(
+                    _pitaya,
+                    name,
+                    value,
+                    labels,
+                    (UInt32)labels.Length,
+                    callback,
+                    GCHandle.ToIntPtr(handle)
+                );
+
+                return t.Task;
+            });
+        }
+
         static void Callback(IntPtr userData)
         {
             var handle = GCHandle.FromIntPtr(userData);

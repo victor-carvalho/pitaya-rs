@@ -63,6 +63,14 @@ void pitaya_custom_metrics_add_counter(PitayaCustomMetrics *m,
                                        char **variable_labels,
                                        uint32_t variable_labels_count);
 
+void pitaya_custom_metrics_add_gauge(PitayaCustomMetrics *m,
+                                     char *namespace_,
+                                     char *subsystem,
+                                     char *name,
+                                     char *help,
+                                     char **variable_labels,
+                                     uint32_t variable_labels_count);
+
 void pitaya_custom_metrics_add_hist(PitayaCustomMetrics *m,
                                     char *namespace_,
                                     char *subsystem,
@@ -96,6 +104,14 @@ PitayaError *pitaya_initialize_with_nats(void *user_ctx,
                                          PitayaServerInfo *server_info,
                                          Pitaya **pitaya);
 
+void pitaya_metrics_add_gauge(Pitaya *p,
+                              char *name,
+                              double value,
+                              char **labels,
+                              uint32_t labels_count,
+                              void (*callback)(void*),
+                              void *user_data);
+
 void pitaya_metrics_inc_counter(Pitaya *p,
                                 char *name,
                                 char **labels,
@@ -110,6 +126,14 @@ void pitaya_metrics_observe_hist(Pitaya *p,
                                  uint32_t labels_count,
                                  void (*callback)(void*),
                                  void *user_data);
+
+void pitaya_metrics_set_gauge(Pitaya *p,
+                              char *name,
+                              double value,
+                              char **labels,
+                              uint32_t labels_count,
+                              void (*callback)(void*),
+                              void *user_data);
 
 void pitaya_rpc_drop(PitayaRpc *rpc);
 

@@ -16,6 +16,10 @@ namespace exampleapp.Handlers
                 "false",
             });
 
+            await NPitaya.PitayaCluster.SetGauge("super_gauge", 650.0, new string[] {
+                "false",
+            });
+
             try
             {
                 await session.Bind("CSHARP_UID");
