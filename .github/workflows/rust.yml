@@ -11,19 +11,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Depends on all action sthat are required for a "successful" CI run.
-  tests-pass:
-    name: all jobs pass
-    runs-on: ubuntu-latest
-    needs:
-      - test
-      - lint
-      - docs
-      - build
-      - nupkg
-    steps:
-      - run: exit 0
-
   test:
     name: test pitaya
     runs-on: ubuntu-latest
@@ -43,7 +30,7 @@ jobs:
           makers deps
           cargo test
           makers undeps
-    
+
   build-mac:
     name: build pitaya for mac
     runs-on: macos-latest
@@ -55,23 +42,27 @@ jobs:
       - name: Install Rust
         run: rustup update stable
 
+      - name: Install fmt
+        run: rustup component add rustfmt
+
       - name: Build Pitaya
         run: cargo build --release
+
+      # We have to tar the artifact before upload, otherwise we'll lose 
+      # permissions of the executable when downloading the artifact again.
+      # Ref: https://github.com/actions/download-artifact#maintaining-file-permissions-and-case-sensitive-files
+      - name: Tar Build Artifact
+        run: tar -cvf libpitaya.dylib.tar target/release/libpitaya.dylib
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: libpitaya.dylib
-          path: target/release/libpitaya.dylib
+          name: libpitaya.dylib.tar
+          path: libpitaya.dylib.tar
 
   build-linux:
     name: build pitaya for linux
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
     steps:
       - uses: actions/checkout@v2
         with:
@@ -83,14 +74,20 @@ jobs:
       - name: Build Pitaya
         run: cargo build --release
 
+      # We have to tar the artifact before upload, otherwise we'll lose 
+      # permissions of the executable when downloading the artifact again.
+      # Ref: https://github.com/actions/download-artifact#maintaining-file-permissions-and-case-sensitive-files
+      - name: Tar Build Artifact
+        run: tar -cvf libpitaya.so.tar target/release/libpitaya.so
+
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: libpitaya.so
-          path: target/release/libpitaya.so
+          name: libpitaya.so.tar
+          path: libpitaya.so.tar
 
   lint:
-    name: clippy
+    name: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -109,38 +106,42 @@ jobs:
       - name: "clippy --all"
         run: cargo clippy --all --tests
 
-  docs:
-    name: docs
+  nupkg:
+    name: create nupkg
     runs-on: ubuntu-latest
+    needs:
+      - test
+      - lint
+      - build-linux
+      - build-mac
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: true
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
 
-      - name: "doc --lib --all-features"
-        run: cargo doc --lib --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: --cfg docsrs
-
-  nupkg:
-    name: Create NuPkg
-    runs-on: ubuntu-latest
-    needs:
-      - build-linux
-      - build-mac
-    steps:
       # Download Mac binary
       - uses: actions/download-artifact@v2
         with:
-          name: libpitaya.so
-          path: target/release
+          name: libpitaya.so.tar
+
       # Download Libnux binary
       - uses: actions/download-artifact@v2
         with:
-          name: libpitaya.dylib
-          path: target/release
+          name: libpitaya.dylib.tar
+        
+      # Open Mac and Linux archives
+      - name: "open mac and linux archives"
+        run: |
+          tar -xvf libpitaya.dylib.tar
+          tar -xvf libpitaya.so.tar
 
+      - name: "build c#"
+        run: |
+          cd pitaya-sharp
+          make pack
 
+      - name: Upload NuPkg
+        uses: actions/upload-artifact@v2
+        with:
+          name: NPitaya
+          path: pitaya-sharp/NPitaya/bin/Release/*.nupkg

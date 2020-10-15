@@ -6,11 +6,15 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\NPitaya\NPitaya.csproj" />
+        <!-- <ProjectReference Include="..\NPitaya\NPitaya.csproj" /> -->
+        <PackageReference Include="NPitaya" Version="0.12.4" />
     </ItemGroup>
 
-    <Target Name="PreBuild" BeforeTargets="PreBuildEvent">
-        <Exec Condition=" '$(OS)' == 'Unix' " Command="&#xA;              LINK_FILE=$(ProjectDir)$(OutDir)/libpitaya.dylib&#xA;              if [[ ! -f $LINK_FILE ]]; then&#xA;                  ln -s $(ProjectDir)../../target/debug/libpitaya.dylib $LINK_FILE&#xA;              fi&#xA;            " />
-    </Target>
+    <!-- <Target Name="PreBuild" BeforeTargets="PreBuildEvent"> -->
+    <!-- <Exec Condition=" '$(OS)' == 'Unix' " Command="&#xA;              LINK_FILE=$(ProjectDir)$(OutDir)/libpitaya.dylib&#xA;              if [[ ! -f $LINK_FILE ]]; then&#xA;                  ln -s $(ProjectDir)../../target/debug/libpitaya.dylib $LINK_FILE&#xA;              fi&#xA;            " /> -->
+    <!-- </Target> -->
 
+    <PropertyGroup>
+        <RestoreSources>$(RestoreSources);../NPitaya/bin/Release;https://api.nuget.org/v3/index.json</RestoreSources>
+    </PropertyGroup>
 </Project>

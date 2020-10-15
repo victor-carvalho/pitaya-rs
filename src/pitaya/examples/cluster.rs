@@ -1,7 +1,7 @@
 use pitaya::{metrics::ThreadSafeReporter, Session, State};
 use serde::Serialize;
 use slog::{error, o, Drain};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Serialize)]
 struct JoinResponse {
@@ -128,13 +128,19 @@ async fn main() {
 
     let (pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
         .with_base_settings(pitaya::settings::Settings {
-            server_kind: "room".into(),
             metrics: pitaya::settings::Metrics {
                 enabled: true,
                 ..Default::default()
             },
             ..Default::default()
         })
+        .with_server_info(Arc::new(pitaya::cluster::ServerInfo {
+            id: pitaya::cluster::ServerId::from(""),
+            kind: pitaya::cluster::ServerKind::from(""),
+            metadata: HashMap::new(),
+            hostname: String::new(),
+            frontend: false,
+        }))
         .with_logger(logger.clone())
         .with_client_handlers(pitaya::handlers![entry, hi, bind])
         .with_custom_metrics(vec![pitaya::metrics::Opts {
