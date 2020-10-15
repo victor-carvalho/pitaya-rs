@@ -12,7 +12,15 @@ pub enum Error {
     FailedToStartServer(String),
 }
 
+#[derive(Debug, PartialEq)]
+pub enum MetricKind {
+    Histogram,
+    Gauge,
+    Counter,
+}
+
 pub struct Opts {
+    pub kind: MetricKind,
     pub namespace: String,
     pub subsystem: String,
     pub name: String,
@@ -27,12 +35,15 @@ pub type ThreadSafeReporter = Arc<RwLock<Box<dyn Reporter + Send + Sync>>>;
 pub trait Reporter {
     fn register_counter(&mut self, opts: Opts) -> Result<(), Error>;
     fn register_histogram(&mut self, opts: Opts) -> Result<(), Error>;
+    fn register_gauge(&mut self, opts: Opts) -> Result<(), Error>;
 
     async fn start(&mut self) -> Result<(), Error>;
     async fn shutdown(&mut self) -> Result<(), Error>;
 
     fn inc_counter(&self, name: &str, labels: &[&str]) -> Result<(), Error>;
     fn observe_hist(&self, name: &str, value: f64, labels: &[&str]) -> Result<(), Error>;
+    fn set_gauge(&self, name: &str, value: f64, labels: &[&str]) -> Result<(), Error>;
+    fn add_gauge(&self, name: &str, value: f64, labels: &[&str]) -> Result<(), Error>;
 }
 
 pub struct DummyReporter {}
@@ -44,6 +55,10 @@ impl Reporter for DummyReporter {
     }
 
     fn register_histogram(&mut self, _opts: Opts) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn register_gauge(&mut self, _opts: Opts) -> Result<(), Error> {
         Ok(())
     }
 
@@ -60,6 +75,14 @@ impl Reporter for DummyReporter {
     }
 
     fn observe_hist(&self, _name: &str, _value: f64, _labels: &[&str]) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn set_gauge(&self, _name: &str, _value: f64, _labels: &[&str]) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn add_gauge(&self, _name: &str, _value: f64, _labels: &[&str]) -> Result<(), Error> {
         Ok(())
     }
 }

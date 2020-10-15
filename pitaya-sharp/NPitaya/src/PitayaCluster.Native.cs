@@ -180,6 +180,17 @@ namespace NPitaya
         );
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pitaya_custom_metrics_add_gauge(
+            IntPtr customMetrics,
+            string metricNamespace,
+            string subsystem,
+            string name,
+            string help,
+            string[] variableLabels,
+            UInt32 variableLabelsCount
+        );
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern void pitaya_metrics_inc_counter(
             IntPtr pitaya,
             string name,
@@ -191,6 +202,28 @@ namespace NPitaya
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern void pitaya_metrics_observe_hist(
+            IntPtr pitaya,
+            string name,
+            double value,
+            string[] labels,
+            UInt32 labelsCount,
+            NoErrorCallback callback,
+            IntPtr userData
+        );
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pitaya_metrics_add_gauge(
+            IntPtr pitaya,
+            string name,
+            double value,
+            string[] labels,
+            UInt32 labelsCount,
+            NoErrorCallback callback,
+            IntPtr userData
+        );
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pitaya_metrics_set_gauge(
             IntPtr pitaya,
             string name,
             double value,

@@ -22,6 +22,7 @@ pub struct PrometheusReporter {
     shutdown_sender: Option<oneshot::Sender<()>>,
     histograms: HashMap<String, prometheus::HistogramVec>,
     counters: HashMap<String, prometheus::CounterVec>,
+    gauges: HashMap<String, prometheus::GaugeVec>,
     namespace: String,
     const_labels: HashMap<String, String>,
 }
@@ -45,6 +46,7 @@ impl PrometheusReporter {
             shutdown_sender: None,
             histograms: HashMap::new(),
             counters: HashMap::new(),
+            gauges: HashMap::new(),
             const_labels,
             namespace: prefix,
         })
@@ -135,6 +137,28 @@ impl Reporter for PrometheusReporter {
         Ok(())
     }
 
+    fn register_gauge(&mut self, opts: Opts) -> Result<(), Error> {
+        let name = opts.name.clone();
+        let prometheus_opts = prometheus::Opts {
+            namespace: opts.namespace,
+            subsystem: opts.subsystem,
+            name: opts.name,
+            help: opts.help,
+            const_labels: self.const_labels.clone(),
+            variable_labels: vec![],
+        };
+        let label_names: Vec<&str> = opts.variable_labels.iter().map(|e| e.as_str()).collect();
+        let collector = prometheus::GaugeVec::new(prometheus_opts, &label_names)
+            .map_err(|e| Error::InvalidMetric(e.to_string()))?;
+        self.registry
+            .register(Box::new(collector.clone()))
+            .map_err(|e| Error::InvalidMetric(e.to_string()))?;
+
+        self.gauges.insert(name, collector);
+
+        Ok(())
+    }
+
     fn inc_counter(&self, name: &str, labels: &[&str]) -> Result<(), Error> {
         if let Some(counter) = self.counters.get(name) {
             counter.with_label_values(labels).inc();
@@ -150,6 +174,30 @@ impl Reporter for PrometheusReporter {
     fn observe_hist(&self, name: &str, value: f64, labels: &[&str]) -> Result<(), Error> {
         if let Some(hist) = self.histograms.get(name) {
             hist.with_label_values(&labels).observe(value);
+            Ok(())
+        } else {
+            Err(Error::InvalidMetric(format!(
+                "unknown metric named {}",
+                name
+            )))
+        }
+    }
+
+    fn set_gauge(&self, name: &str, value: f64, labels: &[&str]) -> Result<(), Error> {
+        if let Some(gauge) = self.gauges.get(name) {
+            gauge.with_label_values(&labels).set(value);
+            Ok(())
+        } else {
+            Err(Error::InvalidMetric(format!(
+                "unknown metric named {}",
+                name
+            )))
+        }
+    }
+
+    fn add_gauge(&self, name: &str, value: f64, labels: &[&str]) -> Result<(), Error> {
+        if let Some(gauge) = self.gauges.get(name) {
+            gauge.with_label_values(&labels).add(value);
             Ok(())
         } else {
             Err(Error::InvalidMetric(format!(

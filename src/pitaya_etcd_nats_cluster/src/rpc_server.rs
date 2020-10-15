@@ -161,6 +161,7 @@ impl NatsRpcServer {
             .write()
             .await
             .register_histogram(metrics::Opts {
+                kind: metrics::MetricKind::Histogram,
                 namespace: String::from("pitaya"),
                 subsystem: String::from("nats_rpc_server"),
                 name: String::from("rpc_latency"),

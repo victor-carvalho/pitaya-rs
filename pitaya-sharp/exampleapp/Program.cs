@@ -35,6 +35,12 @@ namespace PitayaCSharpExample
                 help: "this metric is amazing man",
                 variableLabels: new string[] { "error" }
             );
+            customMetrics.AddGauge(
+                subsystem: "random_subsystem",
+                name: "super_gauge",
+                help: "this is a gauge",
+                variableLabels: new string[] { "error" }
+            );
 
             try
             {

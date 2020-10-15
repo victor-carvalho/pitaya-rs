@@ -144,6 +144,7 @@ async fn main() {
         .with_logger(logger.clone())
         .with_client_handlers(pitaya::handlers![entry, hi, bind])
         .with_custom_metrics(vec![pitaya::metrics::Opts {
+            kind: pitaya::metrics::MetricKind::Counter,
             namespace: "cluster_example".to_owned(),
             subsystem: "room".to_owned(),
             name: "my_metric".to_owned(),

@@ -50,5 +50,18 @@ namespace NPitaya
                 (uint)variableLabels.Length
             );
         }
+
+        public void AddGauge(string subsystem, string name, string help, string[] variableLabels)
+        {
+            PitayaCluster.pitaya_custom_metrics_add_gauge(
+                Ptr,
+                _metricsNamespace,
+                subsystem,
+                name,
+                help,
+                variableLabels,
+                (uint)variableLabels.Length
+            );
+        }
     }
 }
