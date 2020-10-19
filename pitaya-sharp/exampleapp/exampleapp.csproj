@@ -7,7 +7,7 @@
 
     <ItemGroup>
         <!-- <ProjectReference Include="..\NPitaya\NPitaya.csproj" /> -->
-        <PackageReference Include="NPitaya" Version="0.13.0" />
+        <PackageReference Include="NPitaya" Version="0.13.1" />
     </ItemGroup>
 
     <!-- <Target Name="PreBuild" BeforeTargets="PreBuildEvent"> -->
