@@ -22,5 +22,5 @@ pack: build
 	@dotnet pack NPitaya --configuration Release
 
 .PHONY: push
-push: pack
+push:
 	@dotnet nuget push NPitaya/bin/Release/*.nupkg -k $(NUGET_API_KEY) -s https://api.nuget.org/v3/index.json
