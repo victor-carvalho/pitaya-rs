@@ -32,6 +32,20 @@ namespace NPitaya
         internal delegate void FinishCallback(IntPtr userData, IntPtr errorMsg);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate void NoErrorCallback(IntPtr userData);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void RegisterCounterFn(IntPtr userData, MetricsOpts opts);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void RegisterHistogramFn(IntPtr userData, MetricsOpts opts);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void RegisterGaugeFn(IntPtr userData, MetricsOpts opts);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void IncCounterFn(IntPtr userData, IntPtr name, ref IntPtr labels, UInt32 labelsCount);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void ObserveHistFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void SetGaugeFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void AddGaugeFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount);
 
         private const string LibName = "libpitaya";
 
@@ -49,7 +63,7 @@ namespace NPitaya
             NativeLogKind logKind,
             IntPtr logFunction,
             IntPtr logCtx,
-            IntPtr customMetrics,
+            IntPtr rawMetricsReporter,
             IntPtr serverInfo,
             out IntPtr pitaya);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
@@ -146,91 +160,21 @@ namespace NPitaya
             IntPtr userData);
 
         //
-        // CustomMetrics
+        // MetricsReporter
         //
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr pitaya_custom_metrics_new();
+        internal static extern void pitaya_metrics_reporter_drop(IntPtr metricsReporter);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_custom_metrics_drop(IntPtr customMetrics);
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_custom_metrics_add_hist(
-            IntPtr customMetrics,
-            string metricNamespace,
-            string subsystem,
-            string name,
-            string help,
-            string[] variableLabels,
-            UInt32 variableLabelsCount,
-            double[] buckets,
-            UInt32 buckets_count
-        );
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_custom_metrics_add_counter(
-            IntPtr customMetrics,
-            string metricNamespace,
-            string subsystem,
-            string name,
-            string help,
-            string[] variableLabels,
-            UInt32 variableLabelsCount
-        );
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_custom_metrics_add_gauge(
-            IntPtr customMetrics,
-            string metricNamespace,
-            string subsystem,
-            string name,
-            string help,
-            string[] variableLabels,
-            UInt32 variableLabelsCount
-        );
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_metrics_inc_counter(
-            IntPtr pitaya,
-            string name,
-            string[] labels,
-            UInt32 labelsCount,
-            NoErrorCallback callback,
-            IntPtr userData
-        );
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_metrics_observe_hist(
-            IntPtr pitaya,
-            string name,
-            double value,
-            string[] labels,
-            UInt32 labelsCount,
-            NoErrorCallback callback,
-            IntPtr userData
-        );
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_metrics_add_gauge(
-            IntPtr pitaya,
-            string name,
-            double value,
-            string[] labels,
-            UInt32 labelsCount,
-            NoErrorCallback callback,
-            IntPtr userData
-        );
-
-        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void pitaya_metrics_set_gauge(
-            IntPtr pitaya,
-            string name,
-            double value,
-            string[] labels,
-            UInt32 labelsCount,
-            NoErrorCallback callback,
-            IntPtr userData
-        );
+        internal static extern IntPtr pitaya_metrics_reporter_new(
+            RegisterCounterFn registerCounterFn,
+            RegisterHistogramFn registerHistogramFn,
+            RegisterGaugeFn registerGaugeFn,
+            IncCounterFn incCounterFn,
+            ObserveHistFn observeHistFn,
+            SetGaugeFn setGaugeFn,
+            AddGaugeFn addGaugeFn,
+            IntPtr userData);
     }
 }

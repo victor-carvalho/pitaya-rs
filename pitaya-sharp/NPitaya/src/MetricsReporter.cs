@@ -1,110 +1,86 @@
 using System;
-using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 
 namespace NPitaya
 {
-    internal class MetricsReporter
+    public class MetricsReporter
     {
-        IntPtr _pitaya;
+        IntPtr _metricsReporterPtr;
 
-        internal MetricsReporter(IntPtr pitaya)
+        public IntPtr Ptr { get { return _metricsReporterPtr; } }
+
+        public MetricsReporter()
         {
-            _pitaya = pitaya;
+            _metricsReporterPtr = PitayaCluster.pitaya_metrics_reporter_new(
+                new PitayaCluster.RegisterCounterFn(RegisterCounterFn),
+                new PitayaCluster.RegisterHistogramFn(RegisterHistogramFn),
+                new PitayaCluster.RegisterGaugeFn(RegisterGaugeFn),
+                new PitayaCluster.IncCounterFn(IncCounterFn),
+                new PitayaCluster.ObserveHistFn(ObserveHistFn),
+                new PitayaCluster.SetGaugeFn(SetGaugeFn),
+                new PitayaCluster.AddGaugeFn(AddGaugeFn),
+                // TODO: here we would have the reference to the prometheus server.
+                IntPtr.Zero);
         }
 
-        internal Task IncCounter(string name, string[] labels)
+        ~MetricsReporter()
         {
-            return Task.Run(() =>
-            {
-                var callback = new PitayaCluster.NoErrorCallback(Callback);
-                var t = new TaskCompletionSource<bool>();
-                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
-
-                PitayaCluster.pitaya_metrics_inc_counter(
-                    _pitaya,
-                    name,
-                    labels,
-                    (UInt32)labels.Length,
-                    callback,
-                    GCHandle.ToIntPtr(handle)
-                );
-
-                return t.Task;
-            });
+            PitayaCluster.pitaya_metrics_reporter_drop(_metricsReporterPtr);
         }
 
-        internal Task ObserveHist(string name, double value, string[] labels)
+        static void RegisterCounterFn(IntPtr userData, MetricsOpts opts)
         {
-            return Task.Run(() =>
-            {
-                var callback = new PitayaCluster.NoErrorCallback(Callback);
-                var t = new TaskCompletionSource<bool>();
-                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
-
-                PitayaCluster.pitaya_metrics_observe_hist(
-                    _pitaya,
-                    name,
-                    value,
-                    labels,
-                    (UInt32)labels.Length,
-                    callback,
-                    GCHandle.ToIntPtr(handle)
-                );
-
-                return t.Task;
-            });
+            // TODO: implementation
+            string ns = Marshal.PtrToStringAnsi(opts.MetricNamespace);
+            string subsystem = Marshal.PtrToStringAnsi(opts.Subsystem);
+            string name = Marshal.PtrToStringAnsi(opts.Name);
+            Console.WriteLine($"Registering Counter {ns}.{subsystem}.{name}");
         }
 
-        internal Task SetGauge(string name, double value, string[] labels)
+        static void RegisterHistogramFn(IntPtr userData, MetricsOpts opts)
         {
-            return Task.Run(() =>
-            {
-                var callback = new PitayaCluster.NoErrorCallback(Callback);
-                var t = new TaskCompletionSource<bool>();
-                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
-
-                PitayaCluster.pitaya_metrics_set_gauge(
-                    _pitaya,
-                    name,
-                    value,
-                    labels,
-                    (UInt32)labels.Length,
-                    callback,
-                    GCHandle.ToIntPtr(handle)
-                );
-
-                return t.Task;
-            });
+            // TODO: implementation
+            string ns = Marshal.PtrToStringAnsi(opts.MetricNamespace);
+            string subsystem = Marshal.PtrToStringAnsi(opts.Subsystem);
+            string name = Marshal.PtrToStringAnsi(opts.Name);
+            Console.WriteLine($"Registering Histogram {ns}.{subsystem}.{name}");
         }
 
-        internal Task AddGauge(string name, double value, string[] labels)
+        static void RegisterGaugeFn(IntPtr userData, MetricsOpts opts)
         {
-            return Task.Run(() =>
-            {
-                var callback = new PitayaCluster.NoErrorCallback(Callback);
-                var t = new TaskCompletionSource<bool>();
-                var handle = GCHandle.Alloc(t, GCHandleType.Normal);
-
-                PitayaCluster.pitaya_metrics_add_gauge(
-                    _pitaya,
-                    name,
-                    value,
-                    labels,
-                    (UInt32)labels.Length,
-                    callback,
-                    GCHandle.ToIntPtr(handle)
-                );
-
-                return t.Task;
-            });
+            // TODO: implementation
+            string ns = Marshal.PtrToStringAnsi(opts.MetricNamespace);
+            string subsystem = Marshal.PtrToStringAnsi(opts.Subsystem);
+            string name = Marshal.PtrToStringAnsi(opts.Name);
+            Console.WriteLine($"Registering Gauge {ns}.{subsystem}.{name}");
         }
 
-        static void Callback(IntPtr userData)
+        static void IncCounterFn(IntPtr userData, IntPtr name, ref IntPtr labels, UInt32 labelsCount)
         {
-            var handle = GCHandle.FromIntPtr(userData);
-            var t = (TaskCompletionSource<bool>)handle.Target;
-            t.SetResult(true);
+            // TODO: implementation
+            string nameStr = Marshal.PtrToStringAnsi(name);
+            Console.WriteLine($"Incrementing counter {nameStr}");
+        }
+
+        static void ObserveHistFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount)
+        {
+            // TODO: implementation
+            string nameStr = Marshal.PtrToStringAnsi(name);
+            Console.WriteLine($"Observing histogram {nameStr} with val {value}");
+        }
+
+        static void SetGaugeFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount)
+        {
+            // TODO: implementation
+            string nameStr = Marshal.PtrToStringAnsi(name);
+            Console.WriteLine($"Setting gauge {nameStr} with val {value}");
+        }
+
+        static void AddGaugeFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount)
+        {
+            // TODO: implementation
+            string nameStr = Marshal.PtrToStringAnsi(name);
+            Console.WriteLine($"Adding gauge {nameStr} with val {value}");
         }
     }
 }
