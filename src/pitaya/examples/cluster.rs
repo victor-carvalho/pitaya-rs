@@ -1,7 +1,11 @@
-use pitaya::{metrics::ThreadSafeReporter, Session, State};
+use pitaya::{
+    metrics::{self, Reporter, ThreadSafeReporter},
+    Session, State,
+};
 use serde::Serialize;
 use slog::{error, o, Drain};
 use std::{collections::HashMap, sync::Arc};
+use tokio::sync::RwLock;
 
 #[derive(Serialize)]
 struct JoinResponse {
@@ -98,19 +102,6 @@ async fn bind(
     })
 }
 
-// func (r *Room) Entry(ctx context.Context, msg []byte) (*JoinResponse, error) {
-//     logger := pitaya.GetDefaultLoggerFromCtx(ctx) // The default logger contains a requestId, the route being executed and the sessionId
-//     s := pitaya.GetSessionFromCtx(ctx)
-//
-//     err := s.Bind(ctx, "helroow")
-//     if err != nil {
-//         logger.Error("Failed to bind session")
-//         logger.Error(err)
-//         return nil, pitaya.Error(err, "RH-000", map[string]string{"failed": "bind"})
-//     }
-//     return &JoinResponse{Result: "ok"}, nil
-// }
-
 fn init_logger() -> slog::Logger {
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
@@ -126,36 +117,51 @@ fn init_logger() -> slog::Logger {
 async fn main() {
     let logger = init_logger();
 
+    let metrics_reporter: ThreadSafeReporter = Arc::new(RwLock::new(Box::new(
+        prometheus_metrics::PrometheusReporter::new(
+            "myprefix".into(),
+            HashMap::new(),
+            logger.clone(),
+            "127.0.0.1:8000".parse().unwrap(),
+            // addr: SocketAddr,
+        )
+        .expect("failed to create metrics reporter"),
+    )));
+
     let (pitaya_server, shutdown_receiver) = pitaya::PitayaBuilder::new()
-        .with_base_settings(pitaya::settings::Settings {
-            metrics: pitaya::settings::Metrics {
-                enabled: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        })
         .with_server_info(Arc::new(pitaya::cluster::ServerInfo {
-            id: pitaya::cluster::ServerId::from(""),
-            kind: pitaya::cluster::ServerKind::from(""),
+            id: pitaya::cluster::ServerId::from("random-id"),
+            kind: pitaya::cluster::ServerKind::from("random"),
             metadata: HashMap::new(),
             hostname: String::new(),
             frontend: false,
         }))
         .with_logger(logger.clone())
         .with_client_handlers(pitaya::handlers![entry, hi, bind])
-        .with_custom_metrics(vec![pitaya::metrics::Opts {
-            kind: pitaya::metrics::MetricKind::Counter,
-            namespace: "cluster_example".to_owned(),
-            subsystem: "room".to_owned(),
-            name: "my_metric".to_owned(),
-            help: "my metric help string".to_owned(),
-            variable_labels: vec!["error".to_owned()],
-            buckets: vec![],
-        }])
-        // .with_server_handlers(pitaya::handlers![room::entry])
+        .with_metrics_reporter(metrics_reporter.clone())
         .build()
         .await
         .expect("failed to startup pitaya");
+
+    metrics_reporter
+        .write()
+        .await
+        .register_counter(metrics::Opts {
+            kind: metrics::MetricKind::Counter,
+            namespace: "mynamespace".into(),
+            subsystem: "subsystem".into(),
+            name: "metric_name".into(),
+            help: "super help".into(),
+            variable_labels: vec![],
+            buckets: vec![],
+        })
+        .unwrap();
+
+    metrics_reporter
+        .read()
+        .await
+        .inc_counter("metric_name", &[])
+        .unwrap();
 
     shutdown_receiver
         .await
