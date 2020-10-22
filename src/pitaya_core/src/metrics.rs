@@ -19,18 +19,27 @@ pub enum MetricKind {
     Counter,
 }
 
+/// The options required for a metric.
 pub struct Opts {
     pub kind: MetricKind,
     pub namespace: String,
     pub subsystem: String,
+    /// The name that the metric is going to have.
+    /// This name has to be unique.
     pub name: String,
+    /// A help string for the metric.
     pub help: String,
+    /// The labels that are used for this metric.
     pub variable_labels: Vec<String>,
+    /// The buckets for a histogram. This field is ignored for other metric kinds.
     pub buckets: Vec<f64>,
 }
 
-pub type ThreadSafeReporter = Arc<RwLock<Box<dyn Reporter + Send + Sync>>>;
+/// Represents a reporter that can be used across multiple threads.
+pub type ThreadSafeReporter = Arc<RwLock<Box<dyn Reporter + Send + Sync + 'static>>>;
 
+/// A Reporter is a trait for any type that can be used for reporting metrics.
+/// Common implementations of this trait could be Prometheus or DogStatsD, for example.
 #[async_trait]
 pub trait Reporter {
     fn register_counter(&mut self, opts: Opts) -> Result<(), Error>;
@@ -46,6 +55,7 @@ pub trait Reporter {
     fn add_gauge(&self, name: &str, value: f64, labels: &[&str]) -> Result<(), Error>;
 }
 
+/// A reporter implementation that does nothing for all methods.
 pub struct DummyReporter {}
 
 #[async_trait]
@@ -87,6 +97,27 @@ impl Reporter for DummyReporter {
     }
 }
 
+/// Creates buckets that are incremented exponentially.
+///
+/// # Examples
+/// ```
+/// let buckets = pitaya_core::metrics::exponential_buckets(1.0, 2.5, 5);
+/// assert_eq!(buckets, vec![1.0, 2.5, 6.25, 15.625, 39.0625]);
+/// ```
+///
+/// # Panics
+/// This function panics if count is zero, start is less than or equal to zero
+/// or factor is smaller than one.
+///
+/// ```rust,should_panic
+/// let _ = pitaya_core::metrics::exponential_buckets(1.0, 2.5, 0);
+/// ```
+/// ```rust,should_panic
+/// let _ = pitaya_core::metrics::exponential_buckets(-1.0, 2.5, 5);
+/// ```
+/// ```rust,should_panic
+/// let _ = pitaya_core::metrics::exponential_buckets(1.0, 0.5, 5);
+/// ```
 pub fn exponential_buckets(start: f64, factor: f64, count: usize) -> Vec<f64> {
     assert!(count >= 1);
     assert!(start > 0.0);
