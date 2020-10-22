@@ -37,9 +37,9 @@ typedef struct PitayaBuffer PitayaBuffer;
 
 typedef struct PitayaContext PitayaContext;
 
-typedef struct PitayaCustomMetrics PitayaCustomMetrics;
-
 typedef struct PitayaError PitayaError;
+
+typedef struct PitayaMetricsReporter PitayaMetricsReporter;
 
 typedef struct PitayaRpc PitayaRpc;
 
@@ -49,41 +49,32 @@ typedef void (*PitayaHandleRpcCallback)(void*, PitayaContext*, PitayaRpc*);
 
 typedef void (*PitayaClusterNotificationCallback)(void*, PitayaClusterNotification, PitayaServerInfo*);
 
+typedef struct {
+    const char *namespace_;
+    const char *subsystem;
+    const char *name;
+    const char *help;
+    char **variable_labels;
+    uint32_t variable_labels_count;
+    double *buckets;
+    uint32_t buckets_count;
+} PitayaMetricsOpts;
+
+typedef void (*PitayaRegisterFn)(void *user_data, PitayaMetricsOpts opts);
+
+typedef void (*PitayaIncCounterFn)(void *user_date, const char *name, const char **labels, uint32_t labels_count);
+
+typedef void (*PitayaObserveHistFn)(void *user_data, const char *name, double value, const char **labels, uint32_t labels_count);
+
+typedef void (*PitayaSetGaugeFn)(void *user_data, const char *name, double value, const char **labels, uint32_t labels_count);
+
+typedef void (*PitayaAddGaugeFn)(void *user_data, const char *name, double value, const char **labels, uint32_t labels_count);
+
 const uint8_t *pitaya_buffer_data(PitayaBuffer *buf, int32_t *len);
 
 void pitaya_buffer_drop(PitayaBuffer *buf);
 
 PitayaBuffer *pitaya_buffer_new(const uint8_t *data, int32_t len);
-
-void pitaya_custom_metrics_add_counter(PitayaCustomMetrics *m,
-                                       char *namespace_,
-                                       char *subsystem,
-                                       char *name,
-                                       char *help,
-                                       char **variable_labels,
-                                       uint32_t variable_labels_count);
-
-void pitaya_custom_metrics_add_gauge(PitayaCustomMetrics *m,
-                                     char *namespace_,
-                                     char *subsystem,
-                                     char *name,
-                                     char *help,
-                                     char **variable_labels,
-                                     uint32_t variable_labels_count);
-
-void pitaya_custom_metrics_add_hist(PitayaCustomMetrics *m,
-                                    char *namespace_,
-                                    char *subsystem,
-                                    char *name,
-                                    char *help,
-                                    char **variable_labels,
-                                    uint32_t variable_labels_count,
-                                    double *buckets,
-                                    uint32_t buckets_count);
-
-void pitaya_custom_metrics_drop(PitayaCustomMetrics *m);
-
-PitayaCustomMetrics *pitaya_custom_metrics_new(void);
 
 const char *pitaya_error_code(PitayaError *err);
 
@@ -100,7 +91,7 @@ PitayaError *pitaya_initialize_with_nats(void *user_ctx,
                                          PitayaLogKind log_kind,
                                          void (*log_function)(void*, char*),
                                          void *log_ctx,
-                                         PitayaCustomMetrics *custom_metrics,
+                                         PitayaMetricsReporter *raw_metrics_reporter,
                                          PitayaServerInfo *server_info,
                                          Pitaya **pitaya);
 
@@ -126,6 +117,17 @@ void pitaya_metrics_observe_hist(Pitaya *p,
                                  uint32_t labels_count,
                                  void (*callback)(void*),
                                  void *user_data);
+
+void pitaya_metrics_reporter_drop(PitayaMetricsReporter *ptr);
+
+PitayaMetricsReporter *pitaya_metrics_reporter_new(PitayaRegisterFn register_counter_fn,
+                                                   PitayaRegisterFn register_histogram_fn,
+                                                   PitayaRegisterFn register_gauge_fn,
+                                                   PitayaIncCounterFn inc_counter_fn,
+                                                   PitayaObserveHistFn observe_hist_fn,
+                                                   PitayaSetGaugeFn set_gauge_fn,
+                                                   PitayaAddGaugeFn add_gauge_fn,
+                                                   void *user_data);
 
 void pitaya_metrics_set_gauge(Pitaya *p,
                               char *name,

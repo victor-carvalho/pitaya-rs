@@ -1,4 +1,4 @@
-use crate::{cluster, context, metrics, protos, utils, PitayaBuilder, ServerId, ServerKind};
+use crate::{cluster, context, protos, utils, PitayaBuilder, ServerId, ServerKind};
 use pitaya_core::Route;
 use prost::Message;
 use slog::{error, o, Drain};
@@ -12,7 +12,9 @@ use std::{
     slice,
     sync::{Arc, Mutex},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, RwLock};
+
+pub mod metrics;
 
 pub struct PitayaError {
     code: CString,
@@ -45,118 +47,6 @@ pub extern "C" fn pitaya_error_message(err: *mut PitayaError) -> *const c_char {
 #[no_mangle]
 pub extern "C" fn pitaya_error_drop(error: *mut PitayaError) {
     let _ = unsafe { Box::from_raw(error) };
-}
-
-//
-// PitayaCustomMetrics
-//
-pub struct PitayaCustomMetrics {
-    metrics: Vec<metrics::Opts>,
-}
-
-#[no_mangle]
-pub extern "C" fn pitaya_custom_metrics_new() -> *mut PitayaCustomMetrics {
-    Box::into_raw(Box::new(PitayaCustomMetrics {
-        metrics: Vec::new(),
-    }))
-}
-
-#[no_mangle]
-pub extern "C" fn pitaya_custom_metrics_drop(m: *mut PitayaCustomMetrics) {
-    if m.is_null() {
-        return;
-    }
-    let _ = unsafe { Box::from_raw(m) };
-}
-
-#[no_mangle]
-pub extern "C" fn pitaya_custom_metrics_add_hist(
-    m: *mut PitayaCustomMetrics,
-    namespace: *mut c_char,
-    subsystem: *mut c_char,
-    name: *mut c_char,
-    help: *mut c_char,
-    variable_labels: *mut *mut c_char,
-    variable_labels_count: u32,
-    buckets: *mut f64,
-    buckets_count: u32,
-) {
-    let mut m = unsafe { mem::ManuallyDrop::new(Box::from_raw(m)) };
-    let variable_labels: Vec<String> = unsafe {
-        slice::from_raw_parts(variable_labels, variable_labels_count as usize)
-            .iter()
-            .map(|l| c_string_to_string(*l))
-            .collect()
-    };
-    let buckets = unsafe { slice::from_raw_parts(buckets, buckets_count as usize) };
-    let opts = metrics::Opts {
-        kind: metrics::MetricKind::Histogram,
-        namespace: unsafe { c_string_to_string(namespace) },
-        subsystem: unsafe { c_string_to_string(subsystem) },
-        name: unsafe { c_string_to_string(name) },
-        help: unsafe { c_string_to_string(help) },
-        variable_labels,
-        buckets: Vec::from(buckets),
-    };
-    m.metrics.push(opts);
-}
-
-#[no_mangle]
-pub extern "C" fn pitaya_custom_metrics_add_counter(
-    m: *mut PitayaCustomMetrics,
-    namespace: *mut c_char,
-    subsystem: *mut c_char,
-    name: *mut c_char,
-    help: *mut c_char,
-    variable_labels: *mut *mut c_char,
-    variable_labels_count: u32,
-) {
-    let mut m = unsafe { mem::ManuallyDrop::new(Box::from_raw(m)) };
-    let variable_labels: Vec<String> = unsafe {
-        slice::from_raw_parts(variable_labels, variable_labels_count as usize)
-            .iter()
-            .map(|l| c_string_to_string(*l))
-            .collect()
-    };
-    let opts = metrics::Opts {
-        kind: metrics::MetricKind::Counter,
-        namespace: unsafe { c_string_to_string(namespace) },
-        subsystem: unsafe { c_string_to_string(subsystem) },
-        name: unsafe { c_string_to_string(name) },
-        help: unsafe { c_string_to_string(help) },
-        variable_labels,
-        buckets: Vec::new(),
-    };
-    m.metrics.push(opts);
-}
-
-#[no_mangle]
-pub extern "C" fn pitaya_custom_metrics_add_gauge(
-    m: *mut PitayaCustomMetrics,
-    namespace: *mut c_char,
-    subsystem: *mut c_char,
-    name: *mut c_char,
-    help: *mut c_char,
-    variable_labels: *mut *mut c_char,
-    variable_labels_count: u32,
-) {
-    let mut m = unsafe { mem::ManuallyDrop::new(Box::from_raw(m)) };
-    let variable_labels: Vec<String> = unsafe {
-        slice::from_raw_parts(variable_labels, variable_labels_count as usize)
-            .iter()
-            .map(|l| c_string_to_string(*l))
-            .collect()
-    };
-    let opts = metrics::Opts {
-        kind: metrics::MetricKind::Gauge,
-        namespace: unsafe { c_string_to_string(namespace) },
-        subsystem: unsafe { c_string_to_string(subsystem) },
-        name: unsafe { c_string_to_string(name) },
-        help: unsafe { c_string_to_string(help) },
-        variable_labels,
-        buckets: Vec::new(),
-    };
-    m.metrics.push(opts);
 }
 
 //
@@ -524,7 +414,7 @@ pub extern "C" fn pitaya_initialize_with_nats(
     log_kind: PitayaLogKind,
     log_function: extern "C" fn(*mut c_void, *mut c_char),
     log_ctx: *mut c_void,
-    custom_metrics: *mut PitayaCustomMetrics,
+    raw_metrics_reporter: *mut metrics::PitayaMetricsReporter,
     server_info: *mut PitayaServerInfo,
     pitaya: *mut *mut Pitaya,
 ) -> *mut PitayaError {
@@ -579,9 +469,12 @@ pub extern "C" fn pitaya_initialize_with_nats(
     };
 
     let res = runtime.block_on(async move {
-        PitayaBuilder::new()
-            .with_env_prefix(&env_prefix.to_string_lossy())
-            .with_config_file(&config_file.to_string_lossy())
+        let env_prefix = env_prefix.to_string_lossy().to_string();
+        let config_file = config_file.to_string_lossy().to_string();
+
+        let builder = PitayaBuilder::new()
+            .with_env_prefix(&env_prefix)
+            .with_config_file(&config_file)
             .with_server_info(server_info.into())
             .with_logger(root_logger)
             .with_rpc_handler(Box::new(move |ctx, _session, rpc| {
@@ -612,15 +505,16 @@ pub extern "C" fn pitaya_initialize_with_nats(
                         );
                     }
                 }
-            })
-            .with_custom_metrics(if custom_metrics.is_null() {
-                vec![]
-            } else {
-                let c = unsafe { Box::from_raw(custom_metrics) };
-                c.metrics
-            })
-            .build()
-            .await
+            });
+
+        let builder = if raw_metrics_reporter.is_null() {
+            builder
+        } else {
+            let raw_metrics_reporter = unsafe { Box::from_raw(raw_metrics_reporter) };
+            builder.with_metrics_reporter(Arc::new(RwLock::new(raw_metrics_reporter)))
+        };
+
+        builder.build().await
     });
 
     match res {
