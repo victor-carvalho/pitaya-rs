@@ -1,5 +1,5 @@
 use pitaya::{
-    metrics::{self, Reporter, ThreadSafeReporter},
+    metrics::{self, ThreadSafeReporter},
     Session, State,
 };
 use serde::Serialize;
