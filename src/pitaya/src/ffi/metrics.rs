@@ -130,7 +130,7 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
     }
 
     fn inc_counter(&self, name: &str, labels: &[&str]) -> Result<(), crate::metrics::Error> {
-        let labels = to_c_metric_labels(labels.iter().map(|s| *s));
+        let labels = to_c_metric_labels(labels.iter().copied());
         let mut labels_ptr: Vec<*const c_char> =
             labels.iter().map(|s| s.as_ptr() as *const c_char).collect();
         let name = CString::new(name).expect("string in rust should be valid");
@@ -151,7 +151,7 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
         value: f64,
         labels: &[&str],
     ) -> Result<(), crate::metrics::Error> {
-        let labels = to_c_metric_labels(labels.iter().map(|s| *s));
+        let labels = to_c_metric_labels(labels.iter().copied());
         let mut labels_ptr: Vec<*const c_char> =
             labels.iter().map(|s| s.as_ptr() as *const c_char).collect();
         let name = CString::new(name).expect("string in rust should be valid");
@@ -173,7 +173,7 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
         value: f64,
         labels: &[&str],
     ) -> Result<(), crate::metrics::Error> {
-        let labels = to_c_metric_labels(labels.iter().map(|s| *s));
+        let labels = to_c_metric_labels(labels.iter().copied());
         let mut labels_ptr: Vec<*const c_char> =
             labels.iter().map(|s| s.as_ptr() as *const c_char).collect();
         let name = CString::new(name).expect("string in rust should be valid");
