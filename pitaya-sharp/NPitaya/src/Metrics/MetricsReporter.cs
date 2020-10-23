@@ -9,8 +9,10 @@ namespace NPitaya.Metrics
 
         public IntPtr Ptr { get { return _metricsReporterPtr; } }
 
-        public MetricsReporter()
+        public MetricsReporter(PrometheusReporter prometheusReporter)
         {
+            var handle = GCHandle.Alloc(prometheusReporter, GCHandleType.Normal);
+            var prometheusReporter1 = GCHandle.ToIntPtr(handle);
             _metricsReporterPtr = PitayaCluster.pitaya_metrics_reporter_new(
                 new PitayaCluster.RegisterCounterFn(RegisterCounterFn),
                 new PitayaCluster.RegisterHistogramFn(RegisterHistogramFn),
@@ -20,7 +22,7 @@ namespace NPitaya.Metrics
                 new PitayaCluster.SetGaugeFn(SetGaugeFn),
                 new PitayaCluster.AddGaugeFn(AddGaugeFn),
                 // TODO: here we would have the reference to the prometheus server.
-                IntPtr.Zero);
+                prometheusReporter1);
         }
 
         ~MetricsReporter()
@@ -30,29 +32,26 @@ namespace NPitaya.Metrics
 
         static void RegisterCounterFn(IntPtr userData, MetricsOpts opts)
         {
-            // TODO: implementation
             string ns = Marshal.PtrToStringAnsi(opts.MetricNamespace);
-            string subsystem = Marshal.PtrToStringAnsi(opts.Subsystem);
+            // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. Add in the future.
             string name = Marshal.PtrToStringAnsi(opts.Name);
-            Console.WriteLine($"Registering Counter {ns}.{subsystem}.{name}");
+            Prometheus.Metrics.CreateCounter(name!, "", ((string[]) null)!);
         }
 
         static void RegisterHistogramFn(IntPtr userData, MetricsOpts opts)
         {
-            // TODO: implementation
             string ns = Marshal.PtrToStringAnsi(opts.MetricNamespace);
-            string subsystem = Marshal.PtrToStringAnsi(opts.Subsystem);
+            // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. Add in the future.
             string name = Marshal.PtrToStringAnsi(opts.Name);
-            Console.WriteLine($"Registering Histogram {ns}.{subsystem}.{name}");
+            Prometheus.Metrics.CreateHistogram(name!, "", ((string[]) null)!);
         }
 
         static void RegisterGaugeFn(IntPtr userData, MetricsOpts opts)
         {
-            // TODO: implementation
             string ns = Marshal.PtrToStringAnsi(opts.MetricNamespace);
-            string subsystem = Marshal.PtrToStringAnsi(opts.Subsystem);
+            // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. Add in the future.
             string name = Marshal.PtrToStringAnsi(opts.Name);
-            Console.WriteLine($"Registering Gauge {ns}.{subsystem}.{name}");
+            Prometheus.Metrics.CreateGauge(name!, "", ((string[]) null)!);
         }
 
         static void IncCounterFn(IntPtr userData, IntPtr name, ref IntPtr labels, UInt32 labelsCount)

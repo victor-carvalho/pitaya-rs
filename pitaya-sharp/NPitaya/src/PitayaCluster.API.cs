@@ -111,6 +111,7 @@ namespace NPitaya
             var logCtx = GCHandle.Alloc(logFunction, GCHandleType.Normal);
 
             _metricsReporter = new PrometheusReporter(metricsConfig);
+            var pitayaMetrics = new MetricsReporter(_metricsReporter);
 
             IntPtr err = pitaya_initialize_with_nats(
                 IntPtr.Zero,
@@ -122,7 +123,7 @@ namespace NPitaya
                 logKind,
                 Marshal.GetFunctionPointerForDelegate(logFunctionCallback),
                 GCHandle.ToIntPtr(logCtx),
-                IntPtr.Zero,
+                pitayaMetrics.Ptr,
                 serverInfo.Handle,
                 out pitaya
             );
