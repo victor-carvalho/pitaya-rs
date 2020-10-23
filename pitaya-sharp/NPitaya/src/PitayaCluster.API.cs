@@ -286,26 +286,6 @@ namespace NPitaya
             return Rpc<T>("", route, msg);
         }
 
-        // public static Task IncCounter(string name, string[] labels = null)
-        // {
-        //     return _metricsReporter.IncCounter(name, labels == null ? new string[] { } : labels);
-        // }
-
-        // public static Task ObserveHist(string name, double value, string[] labels = null)
-        // {
-        //     return _metricsReporter.ObserveHist(name, value, labels == null ? new string[] { } : labels);
-        // }
-
-        // public static Task AddGauge(string name, double value, string[] labels = null)
-        // {
-        //     return _metricsReporter.AddGauge(name, value, labels == null ? new string[] { } : labels);
-        // }
-
-        // public static Task SetGauge(string name, double value, string[] labels = null)
-        // {
-        //     return _metricsReporter.SetGauge(name, value, labels == null ? new string[] { } : labels);
-        // }
-
         private static void OnServerAddedOrRemovedNativeCb(int serverAdded, IntPtr serverPtr, IntPtr user)
         {
             var pitayaClusterHandle = (GCHandle)user;

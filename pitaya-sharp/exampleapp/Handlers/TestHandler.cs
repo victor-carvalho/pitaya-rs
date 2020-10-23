@@ -8,24 +8,10 @@ using NPitaya.Protos;
 #pragma warning disable 1998
 namespace exampleapp.Handlers
 {
-    // class BackendResponse
-    // {
-    //     public int code;
-    //     public string result;
-    // }
-
     class TestHandler : BaseHandler
     {
         public async Task<MyResponse> Entry(PitayaSession session, RPCMsg msg)
         {
-            // await NPitaya.PitayaCluster.IncCounter("super_metric", new string[] {
-            //     "false",
-            // });
-
-            // await NPitaya.PitayaCluster.SetGauge("super_gauge", 650.0, new string[] {
-            //     "false",
-            // });
-
             try
             {
                 await session.Bind("CSHARP_UID");
@@ -35,15 +21,8 @@ namespace exampleapp.Handlers
                 Console.WriteLine($"session bind error: {e.Message}");
             }
 
-            // Send request to backend.
-            // var backendResponse = await NPitaya.PitayaCluster.Rpc<BackendResponse>(
-            //     NPitaya.Route.FromString("backend.room.remote"),
-            //     null
-            // );
-
             var response = new MyResponse
             {
-                // Msg = $"backend response code={backendResponse.code} result={backendResponse.result}",
                 Msg = $"WUJOQWIEJOIQWJEOIQWJEOIQJWEOIJQWIOJE",
                 Code = 200
             };
