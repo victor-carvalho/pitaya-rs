@@ -54,7 +54,7 @@ typedef struct {
     const char *subsystem;
     const char *name;
     const char *help;
-    char **variable_labels;
+    const char **variable_labels;
     uint32_t variable_labels_count;
     double *buckets;
     uint32_t buckets_count;
