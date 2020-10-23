@@ -8,27 +8,26 @@ namespace NPitaya.Metrics
     {
         private const string LabelSeparator = "_";
 
-        public IntPtr Ptr { get { return _metricsReporterPtr; } }
+        public IntPtr Ptr { get; }
 
         public MetricsReporter(PrometheusReporter prometheusReporter)
         {
             var handle = GCHandle.Alloc(prometheusReporter, GCHandleType.Normal);
-            var prometheusReporter1 = GCHandle.ToIntPtr(handle);
-            _metricsReporterPtr = PitayaCluster.pitaya_metrics_reporter_new(
-                new PitayaCluster.RegisterCounterFn(RegisterCounterFn),
-                new PitayaCluster.RegisterHistogramFn(RegisterHistogramFn),
-                new PitayaCluster.RegisterGaugeFn(RegisterGaugeFn),
-                new PitayaCluster.IncCounterFn(IncCounterFn),
-                new PitayaCluster.ObserveHistFn(ObserveHistFn),
-                new PitayaCluster.SetGaugeFn(SetGaugeFn),
-                new PitayaCluster.AddGaugeFn(AddGaugeFn),
-                // TODO: here we would have the reference to the prometheus server.
-                prometheusReporter1);
+            var reporterPtr = GCHandle.ToIntPtr(handle);
+            Ptr = PitayaCluster.pitaya_metrics_reporter_new(
+                RegisterCounterFn,
+                RegisterHistogramFn,
+                RegisterGaugeFn,
+                IncCounterFn,
+                ObserveHistFn,
+                SetGaugeFn,
+                AddGaugeFn,
+                reporterPtr);
         }
 
         ~MetricsReporter()
         {
-            PitayaCluster.pitaya_metrics_reporter_drop(_metricsReporterPtr);
+            PitayaCluster.pitaya_metrics_reporter_drop(Ptr);
         }
 
         static void RegisterCounterFn(IntPtr prometheusPtr, MetricsOpts opts)
