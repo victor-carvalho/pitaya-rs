@@ -90,7 +90,7 @@ namespace NPitaya.Metrics
 
         string BuildKey(string suffix)
         {
-            return string.Format("{1}{0}{2}", LabelSeparator, _namespace, suffix);
+            return $"{_namespace}{LabelSeparator}{suffix}";
         }
     }
 }

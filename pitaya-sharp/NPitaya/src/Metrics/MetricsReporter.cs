@@ -97,7 +97,7 @@ namespace NPitaya.Metrics
 
         private static string BuildKey(string suffix)
         {
-            return string.Format("{1}{0}{2}", LabelSeparator, PitayaSubsystem, suffix);
+            return $"{PitayaSubsystem}{LabelSeparator}{suffix}";
         }
     }
 }
