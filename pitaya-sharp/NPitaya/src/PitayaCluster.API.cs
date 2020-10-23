@@ -29,7 +29,7 @@ namespace NPitaya
         private static LogFunction logFunctionCallback;
         private static RpcClient _rpcClient;
         private static Action _onSignalEvent;
-        private static MetricsReporter _metricsReporter;
+        private static PrometheusReporter _metricsReporter;
 
         public enum ServiceDiscoveryAction
         {
@@ -101,7 +101,7 @@ namespace NPitaya
                                       NativeLogLevel logLevel,
                                       NativeLogKind logKind,
                                       Action<string> logFunction,
-                                      MetricsReporter metricsReporter = null,
+                                      MetricsConfiguration metricsConfig,
                                       ServiceDiscoveryListener serviceDiscoveryListener = null)
         {
             _serviceDiscoveryListener = serviceDiscoveryListener;
@@ -109,6 +109,8 @@ namespace NPitaya
             clusterNotificationCallback = new ClusterNotificationCallbackFunc(ClusterNotificationCallback);
             logFunctionCallback = new LogFunction(LogFunctionCallback);
             var logCtx = GCHandle.Alloc(logFunction, GCHandleType.Normal);
+
+            _metricsReporter = new PrometheusReporter(metricsConfig);
 
             IntPtr err = pitaya_initialize_with_nats(
                 IntPtr.Zero,
@@ -120,7 +122,7 @@ namespace NPitaya
                 logKind,
                 Marshal.GetFunctionPointerForDelegate(logFunctionCallback),
                 GCHandle.ToIntPtr(logCtx),
-                metricsReporter == null ? IntPtr.Zero : metricsReporter.Ptr,
+                IntPtr.Zero,
                 serverInfo.Handle,
                 out pitaya
             );
@@ -133,6 +135,7 @@ namespace NPitaya
             }
 
             _rpcClient = new RpcClient(pitaya, _serializer);
+            _metricsReporter.Start();
         }
 
         static void LogFunctionCallback(IntPtr ctx, IntPtr msg)

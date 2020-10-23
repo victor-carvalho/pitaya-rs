@@ -13,12 +13,13 @@
         <RepositoryUrl>https://github.com/topfreegames/libpitaya-cluster</RepositoryUrl>
         <PackageTags>pitaya,server,games,framework,rpc</PackageTags>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <TargetFrameworks>net461;netstandard2.0;netcoreapp3.1</TargetFrameworks>
+        <TargetFramework>netcoreapp3.1</TargetFramework>
         <RootNamespace>pitaya</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
         <PackageReference Include="Google.Protobuf" Version="3.7.0" />
+        <PackageReference Include="prometheus-net" Version="4.0.0" />
     </ItemGroup>
 
     <ItemGroup>
