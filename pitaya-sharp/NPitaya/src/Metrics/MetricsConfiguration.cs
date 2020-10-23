@@ -1,13 +1,10 @@
-using System.Reflection;
-using System.Reflection.Metadata;
-
 namespace NPitaya.Metrics
 {
     public class MetricsConfiguration
     {
         internal readonly string Host;
-        internal string Port;
-        internal string Namespace;
+        internal readonly string Port;
+        internal readonly string Namespace;
 
         public MetricsConfiguration(string host, string port, string ns)
         {

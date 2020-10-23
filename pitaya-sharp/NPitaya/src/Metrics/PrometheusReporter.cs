@@ -44,7 +44,7 @@ namespace NPitaya.Metrics
         {
             var key = BuildKey(name);
             Logger.Debug($"Registering counter metric {key}");
-            var counter = Prometheus.Metrics.CreateCounter(key, help!);
+            var counter = Prometheus.Metrics.CreateCounter(key, help ?? "");
             _counters.Add(key, counter);
         }
 
@@ -52,7 +52,7 @@ namespace NPitaya.Metrics
         {
             var key = BuildKey(name);
             Logger.Debug($"Registering gauge metric {key}");
-            var gauge = Prometheus.Metrics.CreateGauge(key, help!);
+            var gauge = Prometheus.Metrics.CreateGauge(key, help ?? "");
             _gauges.Add(key, gauge);
         }
 
@@ -60,7 +60,7 @@ namespace NPitaya.Metrics
         {
             var key = BuildKey(name);
             Logger.Debug($"Registering histogram metric {key}");
-            var histogram = Prometheus.Metrics.CreateHistogram(key, help!);
+            var histogram = Prometheus.Metrics.CreateHistogram(key, help ?? "");
             _histograms.Add(key, histogram);
         }
 
