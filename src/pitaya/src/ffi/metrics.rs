@@ -68,9 +68,11 @@ fn generic_register(
     // TODO(lhahn): this function allocates a lot of unnecessary memory.
     // consider improving this in the future.
 
-    let variable_labels = to_c_metric_labels(opts.variable_labels.iter().map(|s| s.as_str()));
-    let mut variable_labels_ptr: Vec<*const c_char> =
-        variable_labels.iter().map(|s| s.as_ptr()).collect();
+    let variable_labels = opts
+        .variable_labels
+        .iter()
+        .map(|l| CString::new(l.as_str()).expect("string should be valid"));
+    let mut variable_labels_ptr: Vec<*const c_char> = variable_labels.map(|s| s.as_ptr()).collect();
 
     // These options will be passed to C#.
     // We cannot simply get a raw pointer to the &str, since C expects
@@ -130,9 +132,11 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
     }
 
     fn inc_counter(&self, name: &str, labels: &[&str]) -> Result<(), crate::metrics::Error> {
-        let labels = to_c_metric_labels(labels.iter().copied());
+        let labels = labels
+            .iter()
+            .map(|l| CString::new(*l).expect("string should be valid"));
         let mut labels_ptr: Vec<*const c_char> =
-            labels.iter().map(|s| s.as_ptr() as *const c_char).collect();
+            labels.map(|s| s.as_ptr() as *const c_char).collect();
         let name = CString::new(name).expect("string in rust should be valid");
 
         (self.inc_counter_fn)(
@@ -151,9 +155,11 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
         value: f64,
         labels: &[&str],
     ) -> Result<(), crate::metrics::Error> {
-        let labels = to_c_metric_labels(labels.iter().copied());
+        let labels = labels
+            .iter()
+            .map(|l| CString::new(*l).expect("string should be valid"));
         let mut labels_ptr: Vec<*const c_char> =
-            labels.iter().map(|s| s.as_ptr() as *const c_char).collect();
+            labels.map(|s| s.as_ptr() as *const c_char).collect();
         let name = CString::new(name).expect("string in rust should be valid");
 
         (self.observe_hist_fn)(
@@ -173,9 +179,10 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
         value: f64,
         labels: &[&str],
     ) -> Result<(), crate::metrics::Error> {
-        let labels = to_c_metric_labels(labels.iter().copied());
-        let mut labels_ptr: Vec<*const c_char> =
-            labels.iter().map(|s| s.as_ptr() as *const c_char).collect();
+        let labels = labels
+            .iter()
+            .map(|l| CString::new(*l).expect("string should be valid"));
+        let mut labels_ptr: Vec<*const c_char> = labels.map(|s| s.as_ptr()).collect();
         let name = CString::new(name).expect("string in rust should be valid");
 
         (self.set_gauge_fn)(
@@ -195,9 +202,11 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
         value: f64,
         labels: &[&str],
     ) -> Result<(), crate::metrics::Error> {
-        let labels = to_c_metric_labels(labels.iter().map(|s| *s));
+        let labels = labels
+            .iter()
+            .map(|l| CString::new(*l).expect("string should be valid"));
         let mut labels_ptr: Vec<*const c_char> =
-            labels.iter().map(|s| s.as_ptr() as *const c_char).collect();
+            labels.map(|s| s.as_ptr() as *const c_char).collect();
         let name = CString::new(name).expect("string in rust should be valid");
 
         (self.add_gauge_fn)(
@@ -238,13 +247,4 @@ pub extern "C" fn pitaya_metrics_reporter_new(
 #[no_mangle]
 pub extern "C" fn pitaya_metrics_reporter_drop(ptr: *mut PitayaMetricsReporter) {
     let _ = unsafe { Box::from_raw(ptr) };
-}
-
-fn to_c_metric_labels<'a, T>(labels: T) -> Vec<CString>
-where
-    T: Iterator<Item = &'a str>,
-{
-    labels
-        .map(|l| CString::new(l).expect("string should be valid"))
-        .collect()
 }
