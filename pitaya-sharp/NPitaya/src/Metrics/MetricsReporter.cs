@@ -7,6 +7,7 @@ namespace NPitaya.Metrics
     public class MetricsReporter
     {
         private const string LabelSeparator = "_";
+        private const string PitayaSubsystem = "pitaya";
 
         public IntPtr Ptr { get; }
 
@@ -33,34 +34,34 @@ namespace NPitaya.Metrics
         static void RegisterCounterFn(IntPtr prometheusPtr, MetricsOpts opts)
         {
             var ns = Marshal.PtrToStringAnsi(opts.MetricNamespace);
-            // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. Add in the future.
+            // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. We'll use a hardcoded one.
             var name = Marshal.PtrToStringAnsi(opts.Name);
             var prometheusReporter = RetrievePrometheus(prometheusPtr);
-            var key = BuildKey(prometheusReporter?.Namespace, name);
+            var key = BuildKey(prometheusReporter?.Namespace, PitayaSubsystem, name);
             Logger.Debug($"Registering Pitaya metric counter {key}");
-            Prometheus.Metrics.CreateCounter(name!, "", ((string[]) null)!);
+            Prometheus.Metrics.CreateCounter(key, "", ((string[]) null)!);
         }
 
         static void RegisterHistogramFn(IntPtr prometheusPtr, MetricsOpts opts)
         {
             var ns = Marshal.PtrToStringAnsi(opts.MetricNamespace);
-            // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. Add in the future.
+            // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. We'll use a hardcoded one.
             var name = Marshal.PtrToStringAnsi(opts.Name);
             var prometheusReporter = RetrievePrometheus(prometheusPtr);
-            var key = BuildKey(prometheusReporter?.Namespace, name);
+            var key = BuildKey(prometheusReporter?.Namespace, PitayaSubsystem, name);
             Logger.Debug($"Registering Pitaya metric histogram {key}");
-            Prometheus.Metrics.CreateHistogram(name!, "", ((string[]) null)!);
+            Prometheus.Metrics.CreateHistogram(key, "", ((string[]) null)!);
         }
 
         static void RegisterGaugeFn(IntPtr prometheusPtr, MetricsOpts opts)
         {
             var ns = Marshal.PtrToStringAnsi(opts.MetricNamespace);
-            // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. Add in the future.
+            // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. We'll use a hardcoded one.
             var name = Marshal.PtrToStringAnsi(opts.Name);
             var prometheusReporter = RetrievePrometheus(prometheusPtr);
-            var key = BuildKey(prometheusReporter?.Namespace, name);
+            var key = BuildKey(prometheusReporter?.Namespace, PitayaSubsystem, name);
             Logger.Debug($"Registering Pitaya metric gauge {key}");
-            Prometheus.Metrics.CreateGauge(name!, "", ((string[]) null)!);
+            Prometheus.Metrics.CreateGauge(key, "", ((string[]) null)!);
         }
 
         static void IncCounterFn(IntPtr userData, IntPtr name, ref IntPtr labels, UInt32 labelsCount)
@@ -97,9 +98,9 @@ namespace NPitaya.Metrics
             return handle.Target as PrometheusReporter;
         }
 
-        private static string BuildKey(string prefix, string suffix)
+        private static string BuildKey(string @namespace, string prefix, string suffix)
         {
-            return string.Format("{1}{0}{2}", LabelSeparator, prefix, suffix);
+            return string.Format("{1}{0}{2}{0}{3}", LabelSeparator, @namespace, prefix, suffix);
         }
     }
 }
