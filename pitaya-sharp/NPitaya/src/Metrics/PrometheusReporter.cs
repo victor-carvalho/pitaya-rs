@@ -8,14 +8,14 @@ namespace NPitaya.Metrics
     {
         private const string LabelSeparator = "_";
 
-        private readonly string _host;
-        private readonly int _port;
-        private readonly MetricServer _server;
-        private readonly string _namespace;
+        readonly string _host;
+        readonly int _port;
+        readonly MetricServer _server;
+        readonly string _namespace;
 
-        private readonly Dictionary<string, Counter> _counters;
-        private readonly Dictionary<string, Gauge> _gauges;
-        private readonly Dictionary<string, Histogram> _histograms;
+        readonly Dictionary<string, Counter> _counters;
+        readonly Dictionary<string, Gauge> _gauges;
+        readonly Dictionary<string, Histogram> _histograms;
 
         internal PrometheusReporter(MetricsConfiguration config) : this(
             config.Host,
@@ -88,7 +88,7 @@ namespace NPitaya.Metrics
             histogram.Observe(value);
         }
 
-        private string BuildKey(string suffix)
+        string BuildKey(string suffix)
         {
             return string.Format("{1}{0}{2}", LabelSeparator, _namespace, suffix);
         }

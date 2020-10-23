@@ -6,8 +6,8 @@ namespace NPitaya.Metrics
 {
     public class MetricsReporter
     {
-        private const string LabelSeparator = "_";
-        private const string PitayaSubsystem = "pitaya";
+        const string LabelSeparator = "_";
+        const string PitayaSubsystem = "pitaya";
 
         public IntPtr Ptr { get; }
 
