@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using NPitaya.Models;
 using NPitaya.Serializer;
 using NPitaya.Protos;
+using NPitaya.Metrics;
 using static NPitaya.Utils.Utils;
 
 // TODO profiling
@@ -27,9 +28,8 @@ namespace NPitaya
         private static ClusterNotificationCallbackFunc clusterNotificationCallback;
         private static LogFunction logFunctionCallback;
         private static RpcClient _rpcClient;
-
         private static Action _onSignalEvent;
-        private static MetricsReporter _metricsReporter;
+        private static PrometheusReporter _metricsReporter;
 
         public enum ServiceDiscoveryAction
         {
@@ -101,7 +101,7 @@ namespace NPitaya
                                       NativeLogLevel logLevel,
                                       NativeLogKind logKind,
                                       Action<string> logFunction,
-                                      MetricsReporter metricsReporter = null,
+                                      MetricsConfiguration metricsConfig,
                                       ServiceDiscoveryListener serviceDiscoveryListener = null)
         {
             _serviceDiscoveryListener = serviceDiscoveryListener;
@@ -109,6 +109,9 @@ namespace NPitaya
             clusterNotificationCallback = new ClusterNotificationCallbackFunc(ClusterNotificationCallback);
             logFunctionCallback = new LogFunction(LogFunctionCallback);
             var logCtx = GCHandle.Alloc(logFunction, GCHandleType.Normal);
+
+            _metricsReporter = new PrometheusReporter(metricsConfig);
+            var pitayaMetrics = new MetricsReporter(_metricsReporter);
 
             IntPtr err = pitaya_initialize_with_nats(
                 IntPtr.Zero,
@@ -120,7 +123,7 @@ namespace NPitaya
                 logKind,
                 Marshal.GetFunctionPointerForDelegate(logFunctionCallback),
                 GCHandle.ToIntPtr(logCtx),
-                metricsReporter == null ? IntPtr.Zero : metricsReporter.Ptr,
+                pitayaMetrics.Ptr,
                 serverInfo.Handle,
                 out pitaya
             );
@@ -133,7 +136,7 @@ namespace NPitaya
             }
 
             _rpcClient = new RpcClient(pitaya, _serializer);
-            _metricsReporter = new MetricsReporter();
+            _metricsReporter.Start();
         }
 
         static void LogFunctionCallback(IntPtr ctx, IntPtr msg)

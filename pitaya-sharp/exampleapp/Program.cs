@@ -4,6 +4,7 @@ using exampleapp.Handlers;
 using exampleapp.remotes;
 using NPitaya;
 using NPitaya.Models;
+using NPitaya.Metrics;
 
 namespace PitayaCSharpExample
 {
@@ -27,6 +28,12 @@ namespace PitayaCSharpExample
                 PitayaCluster.Terminate();
             };
 
+            var metricsParameters = new MetricsConfiguration(
+                "localhost",
+                "8000",
+                "exampleapp"
+            );
+
             try
             {
                 PitayaCluster.Initialize(
@@ -45,7 +52,7 @@ namespace PitayaCSharpExample
                     {
                         Console.Write($"C# Log: {msg}");
                     },
-                    new NPitaya.MetricsReporter(),
+                    metricsParameters,
                     new PitayaCluster.ServiceDiscoveryListener((action, server) =>
                     {
                         switch (action)
