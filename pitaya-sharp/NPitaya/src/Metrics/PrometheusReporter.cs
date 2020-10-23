@@ -7,8 +7,8 @@ namespace NPitaya.Metrics
     {
         private readonly string _host;
         private readonly int _port;
-        private readonly string _namespace;
         private readonly MetricServer _server;
+        internal readonly string Namespace;
 
         internal PrometheusReporter(MetricsConfiguration config) : this(
             config.Host,
@@ -18,9 +18,9 @@ namespace NPitaya.Metrics
 
         private PrometheusReporter(string host, string port, string @namespace)
         {
+            Namespace = @namespace;
             _host = host;
             _port = int.Parse(port);
-            _namespace = @namespace;
             _server = new MetricServer(hostname: _host, port: _port);
         }
 
