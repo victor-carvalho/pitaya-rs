@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using NPitaya.Models;
 using NPitaya.Serializer;
 using NPitaya.Protos;
+using NPitaya.Metrics;
 using static NPitaya.Utils.Utils;
 
 // TODO profiling
@@ -27,7 +28,6 @@ namespace NPitaya
         private static ClusterNotificationCallbackFunc clusterNotificationCallback;
         private static LogFunction logFunctionCallback;
         private static RpcClient _rpcClient;
-
         private static Action _onSignalEvent;
         private static MetricsReporter _metricsReporter;
 
@@ -133,7 +133,6 @@ namespace NPitaya
             }
 
             _rpcClient = new RpcClient(pitaya, _serializer);
-            _metricsReporter = new MetricsReporter();
         }
 
         static void LogFunctionCallback(IntPtr ctx, IntPtr msg)

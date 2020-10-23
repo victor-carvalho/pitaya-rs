@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace NPitaya
+namespace NPitaya.Metrics
 {
     public class MetricsReporter
     {
