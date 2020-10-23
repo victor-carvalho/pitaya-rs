@@ -1,38 +1,7 @@
 use crate::constants;
 use config::{Config, ConfigError, Environment, File};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, time::Duration};
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(default)]
-pub struct Metrics {
-    // The namespace that will be used when reporting metrics. Default "pitaya".
-    pub namespace: String,
-
-    // The URL where the metrics server will listen in.
-    pub url: String,
-
-    // The path the metrics server will respond to.
-    pub path: String,
-
-    // Const labels for this specific server.
-    pub const_labels: HashMap<String, String>,
-
-    // If the metrics are enabled or not (default is false).
-    pub enabled: bool,
-}
-
-impl Default for Metrics {
-    fn default() -> Self {
-        Self {
-            namespace: constants::DEFAULT_METRICS_NAMESPACE.to_owned(),
-            url: constants::DEFAULT_METRICS_URL.to_owned(),
-            path: constants::DEFAULT_METRICS_PATH.to_owned(),
-            const_labels: HashMap::new(),
-            enabled: false,
-        }
-    }
-}
+use std::time::Duration;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Settings {
@@ -50,9 +19,6 @@ pub struct Settings {
 
     // NATS related settings.
     pub nats: pitaya_etcd_nats_cluster::settings::Nats,
-
-    // Metrics related settings.
-    pub metrics: Metrics,
 }
 
 impl Default for Settings {
@@ -62,7 +28,6 @@ impl Default for Settings {
             shutdown_timeout: constants::DEFAULT_SHUTDOWN_TIMEOUT,
             etcd: Default::default(),
             nats: Default::default(),
-            metrics: Default::default(),
         }
     }
 }

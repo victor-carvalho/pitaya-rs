@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Threading;
 using exampleapp.Handlers;
 using exampleapp.remotes;
 using NPitaya;
@@ -28,20 +27,6 @@ namespace PitayaCSharpExample
                 PitayaCluster.Terminate();
             };
 
-            var customMetrics = new CustomMetrics("csharp_namespace");
-            customMetrics.AddCounter(
-                subsystem: "random_subsystem",
-                name: "super_metric",
-                help: "this metric is amazing man",
-                variableLabels: new string[] { "error" }
-            );
-            customMetrics.AddGauge(
-                subsystem: "random_subsystem",
-                name: "super_gauge",
-                help: "this is a gauge",
-                variableLabels: new string[] { "error" }
-            );
-
             try
             {
                 PitayaCluster.Initialize(
@@ -60,7 +45,7 @@ namespace PitayaCSharpExample
                     {
                         Console.Write($"C# Log: {msg}");
                     },
-                    customMetrics,
+                    new NPitaya.MetricsReporter(),
                     new PitayaCluster.ServiceDiscoveryListener((action, server) =>
                     {
                         switch (action)

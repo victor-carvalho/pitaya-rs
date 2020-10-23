@@ -28,6 +28,7 @@ pitaya_macros = { path = "../pitaya_macros" }
 pitaya_etcd_nats_cluster = { path = "../pitaya_etcd_nats_cluster" }
 prometheus_metrics = { path = "../prometheus_metrics" }
 test_helpers = { path = "../test_helpers" }
+async-trait = "0.1"
 
 prost = "0.6.1"
 futures = "0.3"
@@ -35,7 +36,6 @@ tokio = { version = "0.2", features = ["full"] }
 serde_json = "1.0"
 serde = "1.0"
 rand = "0.7.3"
-uuid = { version = "0.8", features = ["v4"] }
 slog = { version = "2.5", features = ["max_level_trace"] }
 slog-json = "2.3"
 slog-term = "2.6.0"

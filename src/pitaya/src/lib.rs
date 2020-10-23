@@ -418,34 +418,6 @@ impl Pitaya {
         self.logger.clone()
     }
 
-    async fn register_metrics(&mut self, metrics: Vec<metrics::Opts>) -> Result<(), Error> {
-        for metric in metrics {
-            match &metric.kind {
-                metrics::MetricKind::Counter => {
-                    debug!(self.logger, "registering counter: {}", metric.name);
-                    self.metrics_reporter
-                        .write()
-                        .await
-                        .register_counter(metric)?;
-                }
-                metrics::MetricKind::Histogram => {
-                    debug!(self.logger, "registering histogram: {}", metric.name);
-                    // If we have buckets it means this is a histogram.
-                    self.metrics_reporter
-                        .write()
-                        .await
-                        .register_histogram(metric)?;
-                }
-                metrics::MetricKind::Gauge => {
-                    debug!(self.logger, "registering gauge: {}", metric.name);
-                    // If we have buckets it means this is a histogram.
-                    self.metrics_reporter.write().await.register_gauge(metric)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub async fn inc_counter(&self, name: &str, labels: &[&str]) {
         if let Err(e) = self.metrics_reporter.read().await.inc_counter(name, labels) {
             warn!(self.logger, "failed to increment counter"; "name" => name, "error" => %e);
@@ -501,8 +473,8 @@ pub struct PitayaBuilder<'a> {
     client_handlers: handler::Handlers,
     server_handlers: handler::Handlers,
     container: state::Container,
-    metrics: Vec<metrics::Opts>,
     server_info: Option<Arc<ServerInfo>>,
+    metrics_reporter: Option<metrics::ThreadSafeReporter>,
 }
 
 impl<'a> Default for PitayaBuilder<'a> {
@@ -525,8 +497,8 @@ impl<'a> PitayaBuilder<'a> {
             client_handlers: handler::Handlers::new(),
             server_handlers: handler::Handlers::new(),
             container: state::Container::new(),
-            metrics: Vec::new(),
             server_info: None,
+            metrics_reporter: None,
         }
     }
 
@@ -611,9 +583,9 @@ impl<'a> PitayaBuilder<'a> {
         self
     }
 
-    /// Specifies custom metrics that will be registered on the server.
-    pub fn with_custom_metrics(mut self, metrics: Vec<metrics::Opts>) -> Self {
-        self.metrics = metrics;
+    /// Specifies a custom metrics reporter for pitaya to use.
+    pub fn with_metrics_reporter(mut self, metrics_reporter: metrics::ThreadSafeReporter) -> Self {
+        self.metrics_reporter.replace(metrics_reporter);
         self
     }
 
@@ -643,27 +615,9 @@ impl<'a> PitayaBuilder<'a> {
         let nats_settings = Arc::new(settings.nats.clone());
         let server_info = self.server_info.expect("server_info should not be None");
 
-        let metrics_reporter: metrics::ThreadSafeReporter = if settings.metrics.enabled {
-            let metrics_addr =
-                settings
-                    .metrics
-                    .url
-                    .parse()
-                    .map_err(|_e| Error::InvalidAddress {
-                        module: "metrics".to_string(),
-                        address: settings.metrics.url.clone(),
-                    })?;
-            Arc::new(RwLock::new(Box::new(
-                prometheus_metrics::PrometheusReporter::new(
-                    settings.metrics.namespace.clone(),
-                    settings.metrics.const_labels.clone(),
-                    logger.clone(),
-                    metrics_addr,
-                )?,
-            )))
-        } else {
-            Arc::new(RwLock::new(Box::new(metrics::DummyReporter {})))
-        };
+        let metrics_reporter: metrics::ThreadSafeReporter = self
+            .metrics_reporter
+            .unwrap_or_else(|| Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))));
 
         let discovery: Arc<Mutex<Box<dyn cluster::Discovery>>> = Arc::new(Mutex::new(Box::new(
             pitaya_etcd_nats_cluster::EtcdLazy::new(
@@ -718,8 +672,6 @@ impl<'a> PitayaBuilder<'a> {
             container,
         )
         .await?;
-
-        p.register_metrics(self.metrics).await?;
 
         if let Some(subscriber) = self.cluster_subscriber {
             p.add_cluster_subscriber(subscriber).await;

@@ -3,6 +3,19 @@ using System.Runtime.InteropServices;
 
 namespace NPitaya
 {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MetricsOpts
+    {
+        public IntPtr MetricNamespace;
+        public IntPtr Subsystem;
+        public IntPtr Name;
+        public IntPtr Help;
+        public IntPtr VariableLabels;
+        public UInt32 VariableLabelsCount;
+        public IntPtr Buckets;
+        public UInt32 BucketsCount;
+    }
+
     public struct PitayaError
     {
         public string Code;

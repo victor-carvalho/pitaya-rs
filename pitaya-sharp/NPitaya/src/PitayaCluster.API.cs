@@ -101,7 +101,7 @@ namespace NPitaya
                                       NativeLogLevel logLevel,
                                       NativeLogKind logKind,
                                       Action<string> logFunction,
-                                      CustomMetrics customMetrics = null,
+                                      MetricsReporter metricsReporter = null,
                                       ServiceDiscoveryListener serviceDiscoveryListener = null)
         {
             _serviceDiscoveryListener = serviceDiscoveryListener;
@@ -120,7 +120,7 @@ namespace NPitaya
                 logKind,
                 Marshal.GetFunctionPointerForDelegate(logFunctionCallback),
                 GCHandle.ToIntPtr(logCtx),
-                customMetrics == null ? IntPtr.Zero : customMetrics.Ptr,
+                metricsReporter == null ? IntPtr.Zero : metricsReporter.Ptr,
                 serverInfo.Handle,
                 out pitaya
             );
@@ -133,7 +133,7 @@ namespace NPitaya
             }
 
             _rpcClient = new RpcClient(pitaya, _serializer);
-            _metricsReporter = new MetricsReporter(pitaya);
+            _metricsReporter = new MetricsReporter();
         }
 
         static void LogFunctionCallback(IntPtr ctx, IntPtr msg)
@@ -284,26 +284,6 @@ namespace NPitaya
         public static Task<T> Rpc<T>(Route route, object msg)
         {
             return Rpc<T>("", route, msg);
-        }
-
-        public static Task IncCounter(string name, string[] labels = null)
-        {
-            return _metricsReporter.IncCounter(name, labels == null ? new string[] { } : labels);
-        }
-
-        public static Task ObserveHist(string name, double value, string[] labels = null)
-        {
-            return _metricsReporter.ObserveHist(name, value, labels == null ? new string[] { } : labels);
-        }
-
-        public static Task AddGauge(string name, double value, string[] labels = null)
-        {
-            return _metricsReporter.AddGauge(name, value, labels == null ? new string[] { } : labels);
-        }
-
-        public static Task SetGauge(string name, double value, string[] labels = null)
-        {
-            return _metricsReporter.SetGauge(name, value, labels == null ? new string[] { } : labels);
         }
 
         private static void OnServerAddedOrRemovedNativeCb(int serverAdded, IntPtr serverPtr, IntPtr user)

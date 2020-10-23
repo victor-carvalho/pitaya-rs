@@ -12,14 +12,6 @@ namespace exampleapp.Handlers
     {
         public async Task<MyResponse> Entry(PitayaSession session, RPCMsg msg)
         {
-            await NPitaya.PitayaCluster.IncCounter("super_metric", new string[] {
-                "false",
-            });
-
-            await NPitaya.PitayaCluster.SetGauge("super_gauge", 650.0, new string[] {
-                "false",
-            });
-
             try
             {
                 await session.Bind("CSHARP_UID");
@@ -31,7 +23,7 @@ namespace exampleapp.Handlers
 
             var response = new MyResponse
             {
-                Msg = $"csharp handler [uid={session.Uid}] :) route={msg.Route} msg={msg.Msg}",
+                Msg = $"WUJOQWIEJOIQWJEOIQWJEOIQJWEOIJQWIOJE",
                 Code = 200
             };
             return response;
