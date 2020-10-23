@@ -29,7 +29,6 @@ namespace PitayaCSharpExample
             };
 
             var metricsParameters = new MetricsConfiguration(
-                true,
                 "localhost",
                 "8000",
                 "exampleapp"
