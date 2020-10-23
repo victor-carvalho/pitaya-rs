@@ -37,9 +37,8 @@ namespace NPitaya.Metrics
             // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. We'll use a hardcoded one.
             var name = Marshal.PtrToStringAnsi(opts.Name);
             var prometheusReporter = RetrievePrometheus(prometheusPtr);
-            var key = BuildKey(prometheusReporter?.Namespace, PitayaSubsystem, name);
-            Logger.Debug($"Registering Pitaya metric counter {key}");
-            Prometheus.Metrics.CreateCounter(key, "", ((string[]) null)!);
+            var key = BuildKey(name);
+            prometheusReporter.RegisterCounter(key);
         }
 
         static void RegisterHistogramFn(IntPtr prometheusPtr, MetricsOpts opts)
@@ -48,9 +47,8 @@ namespace NPitaya.Metrics
             // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. We'll use a hardcoded one.
             var name = Marshal.PtrToStringAnsi(opts.Name);
             var prometheusReporter = RetrievePrometheus(prometheusPtr);
-            var key = BuildKey(prometheusReporter?.Namespace, PitayaSubsystem, name);
-            Logger.Debug($"Registering Pitaya metric histogram {key}");
-            Prometheus.Metrics.CreateHistogram(key, "", ((string[]) null)!);
+            var key = BuildKey(name);
+            prometheusReporter.RegisterHistogram(key);
         }
 
         static void RegisterGaugeFn(IntPtr prometheusPtr, MetricsOpts opts)
@@ -59,37 +57,36 @@ namespace NPitaya.Metrics
             // TODO (felipe.rodopoulos): prometheus-net does not support subsystem label yet. We'll use a hardcoded one.
             var name = Marshal.PtrToStringAnsi(opts.Name);
             var prometheusReporter = RetrievePrometheus(prometheusPtr);
-            var key = BuildKey(prometheusReporter?.Namespace, PitayaSubsystem, name);
-            Logger.Debug($"Registering Pitaya metric gauge {key}");
-            Prometheus.Metrics.CreateGauge(key, "", ((string[]) null)!);
+            var key = BuildKey(name);
+            prometheusReporter.RegisterGauge(key);
         }
 
-        static void IncCounterFn(IntPtr userData, IntPtr name, ref IntPtr labels, UInt32 labelsCount)
+        static void IncCounterFn(IntPtr prometheusPtr, IntPtr name, ref IntPtr labels, UInt32 labelsCount)
         {
-            // TODO: implementation
             string nameStr = Marshal.PtrToStringAnsi(name);
-            Console.WriteLine($"Incrementing counter {nameStr}");
+            var prometheus = RetrievePrometheus(prometheusPtr);
+            prometheus.IncCounter(nameStr);
         }
 
-        static void ObserveHistFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount)
+        static void ObserveHistFn(IntPtr prometheusPtr, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount)
         {
-            // TODO: implementation
             string nameStr = Marshal.PtrToStringAnsi(name);
-            Console.WriteLine($"Observing histogram {nameStr} with val {value}");
+            var key = BuildKey(nameStr);
+            var prometheus = RetrievePrometheus(prometheusPtr);
+            prometheus.ObserveHistogram(key, value);
         }
 
-        static void SetGaugeFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount)
+        static void SetGaugeFn(IntPtr prometheusPtr, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount)
         {
-            // TODO: implementation
             string nameStr = Marshal.PtrToStringAnsi(name);
-            Console.WriteLine($"Setting gauge {nameStr} with val {value}");
+            var prometheus = RetrievePrometheus(prometheusPtr);
+            prometheus.SetGauge(nameStr, value);
         }
 
-        static void AddGaugeFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount)
+        static void AddGaugeFn(IntPtr prometheusPtr, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount)
         {
-            // TODO: implementation
             string nameStr = Marshal.PtrToStringAnsi(name);
-            Console.WriteLine($"Adding gauge {nameStr} with val {value}");
+            Logger.Warn($"Adding gauge {nameStr} with val {value}. This method should not be used.");
         }
 
         private static PrometheusReporter RetrievePrometheus(IntPtr ptr)
@@ -98,9 +95,9 @@ namespace NPitaya.Metrics
             return handle.Target as PrometheusReporter;
         }
 
-        private static string BuildKey(string @namespace, string prefix, string suffix)
+        private static string BuildKey(string suffix)
         {
-            return string.Format("{1}{0}{2}{0}{3}", LabelSeparator, @namespace, prefix, suffix);
+            return string.Format("{1}{0}{2}", LabelSeparator, PitayaSubsystem, suffix);
         }
     }
 }
