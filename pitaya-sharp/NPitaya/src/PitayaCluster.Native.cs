@@ -63,7 +63,7 @@ namespace NPitaya
             NativeLogKind logKind,
             IntPtr logFunction,
             IntPtr logCtx,
-            IntPtr rawMetricsReporter,
+            IntPtr? rawMetricsReporter,
             IntPtr serverInfo,
             out IntPtr pitaya);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]

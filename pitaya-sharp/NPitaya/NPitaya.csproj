@@ -13,13 +13,19 @@
         <RepositoryUrl>https://github.com/topfreegames/libpitaya-cluster</RepositoryUrl>
         <PackageTags>pitaya,server,games,framework,rpc</PackageTags>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <TargetFrameworks>net461;netstandard2.0;netcoreapp3.1</TargetFrameworks>
+        <!-- TODO (felipe.rodopoulos): reintroduce net461 here. DotNetRuntime metrics collections does not support it, but it need it in Unity envs. -->
+        <TargetFrameworks>netstandard2.1;netcoreapp3.1</TargetFrameworks>
         <RootNamespace>pitaya</RootNamespace>
+
+        <Nullable>enable</Nullable>
     </PropertyGroup>
 
     <ItemGroup>
         <PackageReference Include="Google.Protobuf" Version="3.7.0" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="3.1.9" />
         <PackageReference Include="prometheus-net" Version="4.0.0" />
+        <PackageReference Include="prometheus-net.DotNetRuntime" Version="3.4.0" />
+        <PackageReference Include="prometheus-net.SystemMetrics" Version="1.0.1" />
     </ItemGroup>
 
     <ItemGroup>
