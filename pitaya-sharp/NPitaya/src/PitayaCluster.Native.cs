@@ -39,13 +39,13 @@ namespace NPitaya
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate void RegisterGaugeFn(IntPtr userData, MetricsOpts opts);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        internal delegate void IncCounterFn(IntPtr userData, IntPtr name, ref IntPtr labels, UInt32 labelsCount);
+        internal delegate void IncCounterFn(IntPtr userData, IntPtr name, IntPtr labels, UInt32 labelsCount);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        internal delegate void ObserveHistFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount);
+        internal delegate void ObserveHistFn(IntPtr userData, IntPtr name, double value, IntPtr labels, UInt32 labelsCount);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        internal delegate void SetGaugeFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount);
+        internal delegate void SetGaugeFn(IntPtr userData, IntPtr name, double value, IntPtr labels, UInt32 labelsCount);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        internal delegate void AddGaugeFn(IntPtr userData, IntPtr name, double value, ref IntPtr labels, UInt32 labelsCount);
+        internal delegate void AddGaugeFn(IntPtr userData, IntPtr name, double value, IntPtr labels, UInt32 labelsCount);
 
         private const string LibName = "libpitaya";
 
@@ -63,7 +63,7 @@ namespace NPitaya
             NativeLogKind logKind,
             IntPtr logFunction,
             IntPtr logCtx,
-            IntPtr? rawMetricsReporter,
+            IntPtr rawMetricsReporter,
             IntPtr serverInfo,
             out IntPtr pitaya);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]

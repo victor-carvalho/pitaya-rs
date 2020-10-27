@@ -68,11 +68,13 @@ fn generic_register(
     // TODO(lhahn): this function allocates a lot of unnecessary memory.
     // consider improving this in the future.
 
-    let variable_labels = opts
+    let variable_labels: Vec<CString> = opts
         .variable_labels
         .iter()
-        .map(|l| CString::new(l.as_str()).expect("string should be valid"));
-    let mut variable_labels_ptr: Vec<*const c_char> = variable_labels.map(|s| s.as_ptr()).collect();
+        .map(|l| CString::new(l.as_str()).expect("string should be valid"))
+        .collect();
+    let mut variable_labels_ptr: Vec<*const c_char> =
+        variable_labels.iter().map(|s| s.as_ptr()).collect();
 
     // These options will be passed to C#.
     // We cannot simply get a raw pointer to the &str, since C expects
@@ -132,11 +134,11 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
     }
 
     fn inc_counter(&self, name: &str, labels: &[&str]) -> Result<(), crate::metrics::Error> {
-        let labels = labels
+        let labels: Vec<CString> = labels
             .iter()
-            .map(|l| CString::new(*l).expect("string should be valid"));
-        let mut labels_ptr: Vec<*const c_char> =
-            labels.map(|s| s.as_ptr() as *const c_char).collect();
+            .map(|l| CString::new(*l).expect("string should be valid"))
+            .collect();
+        let mut labels_ptr: Vec<*const c_char> = labels.iter().map(|s| s.as_ptr()).collect();
         let name = CString::new(name).expect("string in rust should be valid");
 
         (self.inc_counter_fn)(
@@ -155,11 +157,11 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
         value: f64,
         labels: &[&str],
     ) -> Result<(), crate::metrics::Error> {
-        let labels = labels
+        let labels: Vec<CString> = labels
             .iter()
-            .map(|l| CString::new(*l).expect("string should be valid"));
-        let mut labels_ptr: Vec<*const c_char> =
-            labels.map(|s| s.as_ptr() as *const c_char).collect();
+            .map(|l| CString::new(*l).expect("string should be valid"))
+            .collect();
+        let mut labels_ptr: Vec<*const c_char> = labels.iter().map(|s| s.as_ptr()).collect();
         let name = CString::new(name).expect("string in rust should be valid");
 
         (self.observe_hist_fn)(
@@ -179,10 +181,11 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
         value: f64,
         labels: &[&str],
     ) -> Result<(), crate::metrics::Error> {
-        let labels = labels
+        let labels: Vec<CString> = labels
             .iter()
-            .map(|l| CString::new(*l).expect("string should be valid"));
-        let mut labels_ptr: Vec<*const c_char> = labels.map(|s| s.as_ptr()).collect();
+            .map(|l| CString::new(*l).expect("string should be valid"))
+            .collect();
+        let mut labels_ptr: Vec<*const c_char> = labels.iter().map(|s| s.as_ptr()).collect();
         let name = CString::new(name).expect("string in rust should be valid");
 
         (self.set_gauge_fn)(
@@ -202,11 +205,11 @@ impl crate::metrics::Reporter for PitayaMetricsReporter {
         value: f64,
         labels: &[&str],
     ) -> Result<(), crate::metrics::Error> {
-        let labels = labels
+        let labels: Vec<CString> = labels
             .iter()
-            .map(|l| CString::new(*l).expect("string should be valid"));
-        let mut labels_ptr: Vec<*const c_char> =
-            labels.map(|s| s.as_ptr() as *const c_char).collect();
+            .map(|l| CString::new(*l).expect("string should be valid"))
+            .collect();
+        let mut labels_ptr: Vec<*const c_char> = labels.iter().map(|s| s.as_ptr()).collect();
         let name = CString::new(name).expect("string in rust should be valid");
 
         (self.add_gauge_fn)(

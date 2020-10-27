@@ -28,11 +28,7 @@ namespace PitayaCSharpExample
                 PitayaCluster.Terminate();
             };
 
-            var metricsParameters = new MetricsConfiguration(
-                "localhost",
-                "8000",
-                "exampleapp"
-            );
+            var metricsParameters = new MetricsConfiguration(true, "127.0.0.1", "8000", "myns", null);
 
             try
             {

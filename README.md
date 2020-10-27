@@ -9,6 +9,12 @@ You can find the C# implementation [here](./pitaya-sharp/README.md).
 The library needs to be build with the minimum Rust version of 1.46. Also, the library
 uses ETCD and NATS for implementing service discovery and RPC communication between servers.
 
+# Cloning
+You have to clone with recursive flag to clone all submodules too.
+```
+git clone --recursive https://github.com/tfgco/pitaya-rs
+```
+
 # Building
 You can build normally as any rust crate:
 ```
@@ -43,10 +49,19 @@ cd examples/c
 ./build.sh && ./example
 ```
 
+# C# Examples
+
 The C# example is found in the `pitaya-sharp/exampleapp` directory and can be run with the following commands:
 ```
 cd pitaya-sharp
 dotnet run -p exampleapp
+```
+
+To build `NPitaya` you need both a `libpitaya.dylib` and `libpitaya.so` in your target folder.
+So to run on OSX you may need to create an empty `libpitaya.so`:
+```
+cd pitaya-rs
+touch ./target/release/libpitaya.so
 ```
 
 # Benchmarks

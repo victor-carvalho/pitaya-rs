@@ -22,5 +22,20 @@ namespace NPitaya.Metrics
         {
             return _pitayaMetrics.Ptr;
         }
+
+        internal void IncCounter(string name, string[]? labels)
+        {
+            _prometheusServer.IncCounter(name, labels);
+        }
+
+        internal void SetGauge(string name, float value, string[]? labels)
+        {
+            _prometheusServer.SetGauge(name, value, labels);
+        }
+
+        internal void ObserveHistogram(string name, float value, string[]? labels)
+        {
+            _prometheusServer.ObserveHistogram(name, value, labels);
+        }
     }
 }
