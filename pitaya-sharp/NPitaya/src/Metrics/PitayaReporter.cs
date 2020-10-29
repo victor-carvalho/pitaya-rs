@@ -1,15 +1,23 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using NPitaya.Models;
-using System.Collections.Generic;
 
 namespace NPitaya.Metrics
 {
+    [SuppressMessage("ReSharper", "PrivateFieldCanBeConvertedToLocalVariable")]
     public class PitayaReporter
     {
         static readonly string[] NoLabels = new string[0];
         const string LabelSeparator = "_";
         const string PitayaSubsystem = "pitaya";
+
+        readonly PitayaCluster.RegisterCounterFn _registerCounterDelegate;
+        readonly PitayaCluster.RegisterGaugeFn _registerGaugeDelegate;
+        readonly PitayaCluster.RegisterHistogramFn _registerHistogramDelegate;
+        readonly PitayaCluster.IncCounterFn _incCounterDelegate;
+        readonly PitayaCluster.SetGaugeFn _setGaugeDelegate;
+        readonly PitayaCluster.ObserveHistFn _observeHistFn;
 
         public IntPtr Ptr { get; }
 
@@ -17,13 +25,21 @@ namespace NPitaya.Metrics
         {
             var handle = GCHandle.Alloc(prometheusReporter, GCHandleType.Normal);
             var reporterPtr = GCHandle.ToIntPtr(handle);
+
+            _registerCounterDelegate = RegisterCounterFn;
+            _registerGaugeDelegate = RegisterGaugeFn;
+            _registerHistogramDelegate = RegisterHistogramFn;
+            _incCounterDelegate = IncCounterFn;
+            _setGaugeDelegate = SetGaugeFn;
+            _observeHistFn = ObserveHistFn;
+
             Ptr = PitayaCluster.pitaya_metrics_reporter_new(
-                RegisterCounterFn,
-                RegisterHistogramFn,
-                RegisterGaugeFn,
-                IncCounterFn,
-                ObserveHistFn,
-                SetGaugeFn,
+                _registerCounterDelegate,
+                _registerHistogramDelegate,
+                _registerGaugeDelegate,
+                _incCounterDelegate,
+                _observeHistFn,
+                _setGaugeDelegate,
                 AddGaugeFn,
                 reporterPtr);
         }

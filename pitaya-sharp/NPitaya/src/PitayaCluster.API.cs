@@ -20,16 +20,16 @@ namespace NPitaya
     {
         private static ISerializer _serializer = new JSONSerializer();
         public delegate string RemoteNameFunc(string methodName);
-        private delegate void OnSignalFunc();
-        private static readonly Dictionary<string, RemoteMethod> RemotesDict = new Dictionary<string, RemoteMethod>();
-        private static readonly Dictionary<string, RemoteMethod> HandlersDict = new Dictionary<string, RemoteMethod>();
-        private static IntPtr pitaya;
-        private static HandleRpcCallbackFunc handleRpcCallback;
-        private static ClusterNotificationCallbackFunc clusterNotificationCallback;
-        private static LogFunction logFunctionCallback;
-        private static RpcClient _rpcClient;
-        private static Action _onSignalEvent;
-        private static MetricsReporter? _metricsReporter;
+        delegate void OnSignalFunc();
+        static readonly Dictionary<string, RemoteMethod> RemotesDict = new Dictionary<string, RemoteMethod>();
+        static readonly Dictionary<string, RemoteMethod> HandlersDict = new Dictionary<string, RemoteMethod>();
+        static IntPtr pitaya;
+        static HandleRpcCallbackFunc _handleRpcCallback;
+        static ClusterNotificationCallbackFunc _clusterNotificationCallback;
+        static LogFunction _logFunctionCallback;
+        static RpcClient _rpcClient;
+        static Action _onSignalEvent;
+        static MetricsReporter? _metricsReporter;
 
         public enum ServiceDiscoveryAction
         {
@@ -47,20 +47,20 @@ namespace NPitaya
             }
         }
 
-        private static ServiceDiscoveryListener _serviceDiscoveryListener;
+        static ServiceDiscoveryListener _serviceDiscoveryListener;
 
         public static void AddSignalHandler(Action cb)
         {
             _onSignalEvent += cb;
         }
 
-        private static void OnSignal()
+        static void OnSignal()
         {
             Logger.Info("Invoking signal handler");
             _onSignalEvent?.Invoke();
         }
 
-        private static void ClusterNotificationCallback(IntPtr userData, NotificationType notificationType, IntPtr serverHandle)
+        static void ClusterNotificationCallback(IntPtr userData, NotificationType notificationType, IntPtr serverHandle)
         {
             if (_serviceDiscoveryListener == null)
             {
@@ -76,7 +76,7 @@ namespace NPitaya
             );
         }
 
-        private static void HandleRpcCallback(IntPtr userData, IntPtr ctx, IntPtr rpc)
+        static void HandleRpcCallback(IntPtr userData, IntPtr ctx, IntPtr rpc)
         {
             Int32 len;
             IntPtr rawData = pitaya_rpc_request(rpc, out len);
@@ -105,9 +105,9 @@ namespace NPitaya
                                       ServiceDiscoveryListener serviceDiscoveryListener = null)
         {
             _serviceDiscoveryListener = serviceDiscoveryListener;
-            handleRpcCallback = new HandleRpcCallbackFunc(HandleRpcCallback);
-            clusterNotificationCallback = new ClusterNotificationCallbackFunc(ClusterNotificationCallback);
-            logFunctionCallback = new LogFunction(LogFunctionCallback);
+            _handleRpcCallback = new HandleRpcCallbackFunc(HandleRpcCallback);
+            _clusterNotificationCallback = new ClusterNotificationCallbackFunc(ClusterNotificationCallback);
+            _logFunctionCallback = new LogFunction(LogFunctionCallback);
             var logCtx = GCHandle.Alloc(logFunction, GCHandleType.Normal);
             var pitayaMetrics = IntPtr.Zero;
             if (metricsConfig.IsEnabled)
@@ -120,11 +120,11 @@ namespace NPitaya
                 IntPtr.Zero,
                 envPrefix,
                 configFile,
-                Marshal.GetFunctionPointerForDelegate(handleRpcCallback),
-                Marshal.GetFunctionPointerForDelegate(clusterNotificationCallback),
+                Marshal.GetFunctionPointerForDelegate(_handleRpcCallback),
+                Marshal.GetFunctionPointerForDelegate(_clusterNotificationCallback),
                 logLevel,
                 logKind,
-                Marshal.GetFunctionPointerForDelegate(logFunctionCallback),
+                Marshal.GetFunctionPointerForDelegate(_logFunctionCallback),
                 GCHandle.ToIntPtr(logCtx),
                 pitayaMetrics,
                 serverInfo.Handle,
@@ -232,7 +232,7 @@ namespace NPitaya
             public string serverId;
         }
 
-        private static void GetServerByIdCallback(IntPtr userData, IntPtr serverHandle)
+        static void GetServerByIdCallback(IntPtr userData, IntPtr serverHandle)
         {
             var handle = GCHandle.FromIntPtr(userData);
             var context = (ServerIdContext)handle.Target;
@@ -307,7 +307,7 @@ namespace NPitaya
             _metricsReporter?.ObserveHistogram(name, value, labels);
         }
 
-        private static void OnServerAddedOrRemovedNativeCb(int serverAdded, IntPtr serverPtr, IntPtr user)
+        static void OnServerAddedOrRemovedNativeCb(int serverAdded, IntPtr serverPtr, IntPtr user)
         {
             var pitayaClusterHandle = (GCHandle)user;
             var serviceDiscoveryListener = pitayaClusterHandle.Target as ServiceDiscoveryListener;
@@ -319,7 +319,6 @@ namespace NPitaya
             }
 
             var server = (Server)Marshal.PtrToStructure(serverPtr, typeof(Server));
-
             if (serverAdded == 1)
                 serviceDiscoveryListener.onServer(ServiceDiscoveryAction.ServerAdded, server);
             else
