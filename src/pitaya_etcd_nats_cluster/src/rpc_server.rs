@@ -155,7 +155,7 @@ impl NatsRpcServer {
     }
 
     async fn record_rpc_start(logger: slog::Logger, reporter: metrics::ThreadSafeReporter) {
-        metrics::add_gauge(
+        metrics::add_to_gauge(
             logger.clone(),
             reporter.clone(),
             RPCS_IN_FLIGHT_METRIC,
@@ -184,7 +184,7 @@ impl NatsRpcServer {
         )
         .await;
 
-        metrics::add_gauge(logger, reporter, RPCS_IN_FLIGHT_METRIC, -1.0, &[]).await;
+        metrics::add_to_gauge(logger, reporter, RPCS_IN_FLIGHT_METRIC, -1.0, &[]).await;
     }
 
     fn respond(

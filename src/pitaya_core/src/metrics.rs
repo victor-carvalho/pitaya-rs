@@ -150,7 +150,7 @@ pub async fn record_histogram_duration<'a>(
     }
 }
 
-pub async fn add_gauge<'a>(
+pub async fn add_to_gauge<'a>(
     logger: slog::Logger,
     reporter: ThreadSafeReporter,
     name: &'a str,
