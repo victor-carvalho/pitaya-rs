@@ -300,7 +300,6 @@ mod tests {
 
     #[tokio::test]
     async fn nats_request_timeout() -> Result<(), Error> {
-        let reporter = Arc::new(RwLock::new(Box::new(metrics::DummyReporter {})));
         let client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
             Arc::new(settings::Nats {
