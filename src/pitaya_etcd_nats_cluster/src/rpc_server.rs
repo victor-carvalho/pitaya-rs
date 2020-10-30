@@ -172,6 +172,9 @@ impl NatsRpcServer {
         rpc_start: Instant,
         success: bool,
     ) {
+        // TODO(lhahn): we're unnecessarily locking the same mutex on the reporter two times.
+        // We should consider changing this if it becomes a problem in the future.
+
         metrics::record_histogram_duration(
             logger.clone(),
             reporter.clone(),
