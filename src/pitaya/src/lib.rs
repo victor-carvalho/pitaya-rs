@@ -647,6 +647,7 @@ impl<'a> PitayaBuilder<'a> {
             logger.clone(),
             nats_settings,
             server_info.clone(),
+            metrics_reporter.clone(),
         )));
 
         let rpc_dispatch = if let Some(rpc_handler) = self.rpc_handler {

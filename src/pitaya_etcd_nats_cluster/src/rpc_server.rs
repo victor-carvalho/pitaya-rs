@@ -10,6 +10,9 @@ use slog::{debug, error, info, o, trace, warn};
 use std::{sync::Arc, time::Instant};
 use tokio::sync::{mpsc, oneshot, RwLock};
 
+const RPC_LATENCY_METRIC: &str = "rpc_latency";
+const RPCS_IN_FLIGHT_METRIC: &str = "rpcs_in_flight";
+
 pub struct NatsRpcServer {
     settings: Arc<settings::Nats>,
     connection: Arc<RwLock<Option<(nats::Connection, nats::subscription::Handler)>>>,
@@ -71,12 +74,15 @@ impl NatsRpcServer {
                 // For the moment we are ignoring the handle returned by the task.
                 // Worst case scenario we will have to kill the task in the middle of its processing
                 // at the end of the program.
+
                 let _ = {
                     let logger = logger.clone();
                     // runtime.spawn(async move {
                     trace!(logger, "spawning response receiver task");
                     let reporter = reporter.clone();
                     runtime_handle.spawn(async move {
+                        Self::record_rpc_start(logger.clone(), reporter.clone()).await;
+
                         match response_receiver.await {
                             Ok(response) => {
                                 let conn = match conn.read().await.as_ref() {
@@ -91,9 +97,9 @@ impl NatsRpcServer {
                                 if let Err(err) = Self::respond(&conn, &response_topic, response)
                                 {
                                     error!(logger, "failed to respond rpc"; "error" => %err);
-                                    metrics::record_histogram_duration(reporter, "rpc_latency", rpc_start, &[&route, "failed"]).await;
+                                    Self::record_rpc_end(logger.clone(), reporter.clone(), &route, rpc_start, false).await;
                                 } else {
-                                    metrics::record_histogram_duration(reporter, "rpc_latency", rpc_start, &[&route, "ok"]).await;
+                                    Self::record_rpc_end(logger.clone(), reporter.clone(), &route, rpc_start, true).await;
                                 }
                             }
                             Err(e) => {
@@ -129,11 +135,12 @@ impl NatsRpcServer {
                         if let Err(err) = Self::respond(&conn, &response_topic, response) {
                             error!(logger, "failed to respond rpc"; "error" => %err);
                         }
-                        metrics::record_histogram_duration(
-                            reporter,
-                            "rpc_latency",
+                        Self::record_rpc_end(
+                            logger.clone(),
+                            reporter.clone(),
+                            &route,
                             rpc_start,
-                            &[&route, "failed"],
+                            false,
                         )
                         .await;
                     })
@@ -145,6 +152,36 @@ impl NatsRpcServer {
         };
 
         Ok(())
+    }
+
+    async fn record_rpc_start(logger: slog::Logger, reporter: metrics::ThreadSafeReporter) {
+        metrics::add_gauge(
+            logger.clone(),
+            reporter.clone(),
+            RPCS_IN_FLIGHT_METRIC,
+            1.0,
+            &[],
+        )
+        .await;
+    }
+
+    async fn record_rpc_end(
+        logger: slog::Logger,
+        reporter: metrics::ThreadSafeReporter,
+        route: &str,
+        rpc_start: Instant,
+        success: bool,
+    ) {
+        metrics::record_histogram_duration(
+            logger.clone(),
+            reporter.clone(),
+            RPC_LATENCY_METRIC,
+            rpc_start,
+            &[route, if success { "ok" } else { "failed" }],
+        )
+        .await;
+
+        metrics::add_gauge(logger, reporter, RPCS_IN_FLIGHT_METRIC, -1.0, &[]).await;
     }
 
     fn respond(
@@ -163,13 +200,27 @@ impl NatsRpcServer {
             .register_histogram(metrics::Opts {
                 kind: metrics::MetricKind::Histogram,
                 namespace: String::from("pitaya"),
-                subsystem: String::from("nats_rpc_server"),
-                name: String::from("rpc_latency"),
+                subsystem: String::from("rpc"),
+                name: String::from(RPC_LATENCY_METRIC),
                 help: String::from("histogram of rpc latency in seconds"),
                 variable_labels: vec!["route".to_string(), "status".to_string()],
                 buckets: metrics::exponential_buckets(0.0005, 2.0, 20),
             })
             .expect("should not fail to register");
+
+        self.reporter
+            .write()
+            .await
+            .register_gauge(metrics::Opts {
+                kind: metrics::MetricKind::Gauge,
+                namespace: String::from("pitaya"),
+                subsystem: String::from("rpc"),
+                name: String::from(RPCS_IN_FLIGHT_METRIC),
+                help: String::from("number of in-flight RPCs at the moment"),
+                variable_labels: vec![],
+                buckets: vec![],
+            })
+            .expect("should not failed to register");
     }
 }
 
@@ -285,6 +336,7 @@ mod tests {
                 test_helpers::get_root_logger(),
                 Arc::new(Default::default()),
                 sv.clone(),
+                Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
             );
             client.start().await?;
 

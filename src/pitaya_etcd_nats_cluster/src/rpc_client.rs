@@ -2,18 +2,21 @@ use crate::settings;
 use async_trait::async_trait;
 use pitaya_core::{
     cluster::{Error, RpcClient, ServerId, ServerInfo, ServerKind},
-    context, message, protos, utils,
+    context, message, metrics, protos, utils,
 };
 use prost::Message;
 use slog::{error, info, trace};
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tokio::sync::RwLock;
+
+const CLIENT_LATENCY_METRIC: &str = "rpc_client_latency";
 
 pub struct NatsRpcClient {
     settings: Arc<settings::Nats>,
     connection: Arc<RwLock<Option<nats::Connection>>>,
     logger: slog::Logger,
     server_info: Arc<ServerInfo>,
+    reporter: metrics::ThreadSafeReporter,
 }
 
 impl NatsRpcClient {
@@ -21,13 +24,31 @@ impl NatsRpcClient {
         logger: slog::Logger,
         settings: Arc<settings::Nats>,
         server_info: Arc<ServerInfo>,
+        reporter: metrics::ThreadSafeReporter,
     ) -> Self {
         Self {
             settings,
             connection: Arc::new(RwLock::new(None)),
             logger,
             server_info,
+            reporter,
         }
+    }
+
+    async fn register_metrics(&self) {
+        self.reporter
+            .write()
+            .await
+            .register_histogram(metrics::Opts {
+                kind: metrics::MetricKind::Histogram,
+                namespace: String::from("pitaya"),
+                subsystem: String::from("rpc"),
+                name: String::from(CLIENT_LATENCY_METRIC),
+                help: String::from("histogram of client rpc latency in seconds"),
+                variable_labels: vec!["status".to_string()],
+                buckets: metrics::exponential_buckets(0.0005, 2.0, 20),
+            })
+            .expect("should not fail to register");
     }
 }
 
@@ -38,12 +59,16 @@ impl RpcClient for NatsRpcClient {
             return Err(Error::AlreadyConnected);
         }
 
+        self.register_metrics().await;
+
         info!(self.logger, "client connecting to nats"; "url" => &self.settings.url);
         let nc = nats::ConnectionOptions::new()
             .max_reconnects(Some(self.settings.max_reconnection_attempts as usize))
             .connect(&self.settings.url)
             .map_err(Error::Nats)?;
+
         self.connection.write().await.replace(nc);
+
         Ok(())
     }
 
@@ -62,6 +87,7 @@ impl RpcClient for NatsRpcClient {
         target: Arc<ServerInfo>,
     ) -> Result<protos::Response, Error> {
         trace!(self.logger, "NatsRpcClient::call");
+        let rpc_start = Instant::now();
         let connection = self
             .connection
             .read()
@@ -96,10 +122,38 @@ impl RpcClient for NatsRpcClient {
         match res {
             Err(join_error) => {
                 error!(self.logger, "failed to join rpc task"; "error" => %join_error);
+                metrics::record_histogram_duration(
+                    self.logger.clone(),
+                    self.reporter.clone(),
+                    CLIENT_LATENCY_METRIC,
+                    rpc_start,
+                    &["failed"],
+                )
+                .await;
                 Err(Error::Internal("failed to join rpc task".to_owned()))
             }
-            Ok(Err(err)) => Err(err),
-            Ok(Ok(r)) => Ok(r),
+            Ok(Err(err)) => {
+                metrics::record_histogram_duration(
+                    self.logger.clone(),
+                    self.reporter.clone(),
+                    CLIENT_LATENCY_METRIC,
+                    rpc_start,
+                    &["failed"],
+                )
+                .await;
+                Err(err)
+            }
+            Ok(Ok(r)) => {
+                metrics::record_histogram_duration(
+                    self.logger.clone(),
+                    self.reporter.clone(),
+                    CLIENT_LATENCY_METRIC,
+                    rpc_start,
+                    &["ok"],
+                )
+                .await;
+                Ok(r)
+            }
         }
     }
 
@@ -224,6 +278,7 @@ mod tests {
                 ..Default::default()
             }),
             new_server(),
+            Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
     }
 
@@ -237,6 +292,7 @@ mod tests {
                 ..Default::default()
             }),
             new_server(),
+            Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
         client.start().await.unwrap();
         client.shutdown().await.unwrap();
@@ -244,6 +300,7 @@ mod tests {
 
     #[tokio::test]
     async fn nats_request_timeout() -> Result<(), Error> {
+        let reporter = Arc::new(RwLock::new(Box::new(metrics::DummyReporter {})));
         let client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
             Arc::new(settings::Nats {
@@ -251,6 +308,7 @@ mod tests {
                 ..Default::default()
             }),
             new_server(),
+            Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
         client.start().await?;
 
@@ -324,6 +382,7 @@ mod tests {
                 ..Default::default()
             }),
             sv,
+            Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
         client.start().await?;
 
