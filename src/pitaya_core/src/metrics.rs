@@ -133,16 +133,31 @@ pub fn exponential_buckets(start: f64, factor: f64, count: usize) -> Vec<f64> {
     buckets
 }
 
-pub async fn record_histogram_duration(
+pub async fn record_histogram_duration<'a>(
+    logger: slog::Logger,
     reporter: ThreadSafeReporter,
-    name: &str,
+    name: &'a str,
     start: std::time::Instant,
-    labels: &[&str],
+    labels: &'a [&'a str],
 ) {
     let elapsed = std::time::Instant::now() - start;
-    reporter
+    if let Err(e) = reporter
         .read()
         .await
         .observe_hist(name, elapsed.as_secs_f64(), labels)
-        .expect("should not fail to observe");
+    {
+        slog::warn!(logger, "observe_hist failed"; "err" => %e);
+    }
+}
+
+pub async fn add_to_gauge<'a>(
+    logger: slog::Logger,
+    reporter: ThreadSafeReporter,
+    name: &'a str,
+    value: f64,
+    labels: &'a [&'a str],
+) {
+    if let Err(e) = reporter.read().await.add_gauge(name, value, labels) {
+        slog::warn!(logger, "add_gauge failed"; "err" => %e);
+    }
 }

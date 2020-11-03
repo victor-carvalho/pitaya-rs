@@ -189,7 +189,7 @@ impl Remote {
         };
 
         if response.error.is_some() {
-            error!(logger, "handler returning error for RPC");
+            warn!(logger, "handler returning error for RPC");
         }
 
         if !rpc.respond(response) {
