@@ -310,7 +310,7 @@ impl Pitaya {
         // sure that the server is set up.
         self.discovery.lock().await.start(app_die_sender).await?;
 
-        info!(self.logger, "finshed starting pitaya server");
+        info!(self.logger, "finished starting pitaya server");
         Ok(graceful_shutdown_receiver)
     }
 

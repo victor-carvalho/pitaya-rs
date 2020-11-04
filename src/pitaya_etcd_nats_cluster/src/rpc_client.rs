@@ -62,7 +62,7 @@ impl RpcClient for NatsRpcClient {
         self.register_metrics().await;
 
         info!(self.logger, "client connecting to nats"; "url" => &self.settings.url);
-        let nc = nats::ConnectionOptions::new()
+        let nc = nats::Options::with_user_pass(&self.settings.auth_user, &self.settings.auth_pass)
             .max_reconnects(Some(self.settings.max_reconnection_attempts as usize))
             .connect(&self.settings.url)
             .map_err(Error::Nats)?;

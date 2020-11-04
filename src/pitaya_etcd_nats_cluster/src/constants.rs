@@ -10,3 +10,5 @@ pub const DEFAULT_NATS_CONN_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DEFAULT_NATS_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEFAULT_NATS_MAX_RECONN_ATTEMPTS: u32 = 5;
 pub const DEFAULT_NATS_MAX_RPCS_QUEUED: u32 = 100;
+pub const DEFAULT_NATS_AUTH_USER: &str = "";
+pub const DEFAULT_NATS_AUTH_PASS: &str = "";
