@@ -48,6 +48,8 @@ jobs:
       - name: Build Pitaya
         run: cargo build --release
 
+      - name: List symbols
+        run: nm target/release/libpitaya.dylib | wc -l
       # We have to tar the artifact before upload, otherwise we'll lose 
       # permissions of the executable when downloading the artifact again.
       # Ref: https://github.com/actions/download-artifact#maintaining-file-permissions-and-case-sensitive-files
