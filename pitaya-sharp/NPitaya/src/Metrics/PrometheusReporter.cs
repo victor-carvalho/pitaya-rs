@@ -100,6 +100,15 @@ namespace NPitaya.Metrics
             gauge.WithLabels(labels ?? NoLabels).Set(value);
         }
 
+        internal void AddGauge(string name, double value, string[]? labels)
+        {
+            var key = BuildKey(name);
+            var gauge = _gauges[key];
+            // TODO(rodopoulos): currently, prometheus-net doesn't have Add method for gauges. This is a workaround.
+            var currentValue = gauge.Value;
+            gauge.WithLabels(labels ?? NoLabels).Set(currentValue + value);
+        }
+
         internal void ObserveHistogram(string name, double value, string[]? labels)
         {
             var key = BuildKey(name);

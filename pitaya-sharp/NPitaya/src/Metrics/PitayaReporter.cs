@@ -17,6 +17,7 @@ namespace NPitaya.Metrics
         readonly PitayaCluster.RegisterHistogramFn _registerHistogramDelegate;
         readonly PitayaCluster.IncCounterFn _incCounterDelegate;
         readonly PitayaCluster.SetGaugeFn _setGaugeDelegate;
+        readonly PitayaCluster.AddGaugeFn _addGaugeFn;
         readonly PitayaCluster.ObserveHistFn _observeHistFn;
 
         public IntPtr Ptr { get; }
@@ -31,6 +32,7 @@ namespace NPitaya.Metrics
             _registerHistogramDelegate = RegisterHistogramFn;
             _incCounterDelegate = IncCounterFn;
             _setGaugeDelegate = SetGaugeFn;
+            _addGaugeFn = AddGaugeFn;
             _observeHistFn = ObserveHistFn;
 
             Ptr = PitayaCluster.pitaya_metrics_reporter_new(
@@ -40,7 +42,7 @@ namespace NPitaya.Metrics
                 _incCounterDelegate,
                 _observeHistFn,
                 _setGaugeDelegate,
-                AddGaugeFn,
+                _addGaugeFn,
                 reporterPtr);
         }
 
@@ -140,7 +142,14 @@ namespace NPitaya.Metrics
         static void AddGaugeFn(IntPtr prometheusPtr, IntPtr name, double value, IntPtr labels, UInt32 labelsCount)
         {
             string nameStr = Marshal.PtrToStringAnsi(name) ?? string.Empty;
-            Logger.Warn($"Adding gauge {nameStr} with val {value}. This method should not be used.");
+            if (string.IsNullOrEmpty(nameStr))
+            {
+                Logger.Warn("Tried to add to a gauge with an empty name");
+                return;
+            }
+            var labelsArr = ReadLabels(labels, labelsCount);
+            var prometheus = RetrievePrometheus(prometheusPtr);
+            prometheus?.AddGauge(nameStr, value, labelsArr);
         }
 
         private static PrometheusReporter? RetrievePrometheus(IntPtr ptr)
