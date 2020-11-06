@@ -107,9 +107,10 @@ namespace NPitaya.Metrics
                 Logger.Warn("Tried to increment a counter with an empty name");
                 return;
             }
+            var key = BuildKey(nameStr);
             var labelsArr = ReadLabels(labels, labelsCount);
             var prometheus = RetrievePrometheus(prometheusPtr);
-            prometheus?.IncCounter(nameStr, labelsArr);
+            prometheus?.IncCounter(key, labelsArr);
         }
 
         static void ObserveHistFn(IntPtr prometheusPtr, IntPtr name, double value, IntPtr labels, UInt32 labelsCount)
@@ -134,9 +135,10 @@ namespace NPitaya.Metrics
                 Logger.Warn("Tried to set a gauge with an empty name");
                 return;
             }
+            var key = BuildKey(nameStr);
             var labelsArr = ReadLabels(labels, labelsCount);
             var prometheus = RetrievePrometheus(prometheusPtr);
-            prometheus?.SetGauge(nameStr, value, labelsArr);
+            prometheus?.SetGauge(key, value, labelsArr);
         }
 
         static void AddGaugeFn(IntPtr prometheusPtr, IntPtr name, double value, IntPtr labels, UInt32 labelsCount)
@@ -147,9 +149,10 @@ namespace NPitaya.Metrics
                 Logger.Warn("Tried to add to a gauge with an empty name");
                 return;
             }
+            var key = BuildKey(nameStr);
             var labelsArr = ReadLabels(labels, labelsCount);
             var prometheus = RetrievePrometheus(prometheusPtr);
-            prometheus?.AddGauge(nameStr, value, labelsArr);
+            prometheus?.AddGauge(key, value, labelsArr);
         }
 
         private static PrometheusReporter? RetrievePrometheus(IntPtr ptr)
