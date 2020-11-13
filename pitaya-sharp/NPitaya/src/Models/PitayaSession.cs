@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using NPitaya.Constants;
-using Json = PitayaSimpleJson.SimpleJson;
 using NPitaya.Protos;
+using Json = PitayaSimpleJson.SimpleJson;
 
 namespace NPitaya.Models
 {
@@ -16,19 +16,19 @@ namespace NPitaya.Models
         string _rawData;
         public string RawData => _rawData;
         public string Uid { get; private set; }
-        RpcClient _rpcClient;
+        readonly RpcClient _rpcClient;
 
-        internal PitayaSession(Protos.Session sessionProto, RpcClient rpcClient)
+        internal PitayaSession(Session sessionProto, RpcClient rpcClient)
         {
             _rpcClient = rpcClient;
             _id = sessionProto.Id;
             Uid = sessionProto.Uid;
             _rawData = sessionProto.Data.ToStringUtf8();
-            if (!String.IsNullOrEmpty(_rawData))
+            if (!string.IsNullOrEmpty(_rawData))
                 _data = Json.DeserializeObject<Dictionary<string, object>>(_rawData);
         }
 
-        internal PitayaSession(Protos.Session sessionProto, RpcClient rpcClient, string frontendId)
+        internal PitayaSession(Session sessionProto, RpcClient rpcClient, string frontendId)
             : this(sessionProto, rpcClient)
         {
             _frontendId = frontendId;
@@ -74,7 +74,7 @@ namespace NPitaya.Models
 
         public Task PushToFrontend()
         {
-            if (String.IsNullOrEmpty(_frontendId))
+            if (string.IsNullOrEmpty(_frontendId))
             {
                 return Task.FromException(new Exception("cannot push to frontend, frontendId is invalid!"));
             }
@@ -134,7 +134,7 @@ namespace NPitaya.Models
 
         Task SendRequestToFront(string route, bool includeData)
         {
-            var sessionProto = new Protos.Session
+            var sessionProto = new Session
             {
                 Id = _id,
                 Uid = Uid

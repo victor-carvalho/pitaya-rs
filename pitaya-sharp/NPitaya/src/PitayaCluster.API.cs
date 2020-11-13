@@ -19,6 +19,7 @@ namespace NPitaya
     public partial class PitayaCluster
     {
         private static ISerializer _serializer = new JSONSerializer();
+        static ProtobufSerializer _remoteSerializer = new ProtobufSerializer();
         public delegate string RemoteNameFunc(string methodName);
         delegate void OnSignalFunc();
         static readonly Dictionary<string, RemoteMethod> RemotesDict = new Dictionary<string, RemoteMethod>();
@@ -282,12 +283,12 @@ namespace NPitaya
             return _rpcClient.SendKickToUser(frontendId, serverKind, kick);
         }
 
-        public static Task<T> Rpc<T>(string serverId, Route route, object msg)
+        public static Task<T> Rpc<T>(string serverId, Route route, IMessage msg)
         {
             return _rpcClient.Rpc<T>(serverId, route, msg);
         }
 
-        public static Task<T> Rpc<T>(Route route, object msg)
+        public static Task<T> Rpc<T>(Route route, IMessage msg)
         {
             return Rpc<T>("", route, msg);
         }

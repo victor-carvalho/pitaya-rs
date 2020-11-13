@@ -13,6 +13,7 @@ namespace exampleapp.remotes
                 Msg = $"[REMOTE] hello from csharp :) {System.Guid.NewGuid().ToString()}, route={msg.Route}, msg={msg.Msg}",
                 Code = 200,
             };
+            Logger.Info($"Received RPC with message {msg.Msg}, {msg.Route}");
             return response;
         }
     }

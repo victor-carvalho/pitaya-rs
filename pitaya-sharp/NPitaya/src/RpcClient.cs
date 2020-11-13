@@ -12,16 +12,38 @@ namespace NPitaya
     // RpcClient allows sending RPC messages to other Pitaya servers.
     internal class RpcClient
     {
-        IntPtr _pitaya;
-        ISerializer _serializer;
+        readonly IntPtr _pitaya;
+        readonly ISerializer _serializer;
+        readonly ProtobufSerializer _internalRpcSerializer;
 
         public RpcClient(IntPtr pitaya, ISerializer serializer)
         {
             _pitaya = pitaya;
             _serializer = serializer;
+            _internalRpcSerializer = BuildInterRpcSerializer(serializer);
+        }
+
+        static ProtobufSerializer BuildInterRpcSerializer(ISerializer receivedSerializer)
+        {
+            if (receivedSerializer.GetType() == typeof(ProtobufSerializer))
+            {
+                return (ProtobufSerializer) receivedSerializer;
+            }
+
+            return new ProtobufSerializer();
         }
 
         public Task<T> Rpc<T>(string serverId, Route route, object msg)
+        {
+            return DoRpc<T>(serverId, route, msg, _serializer);
+        }
+
+        internal Task<T> Rpc<T>(string serverId, Route route, IMessage msg)
+        {
+            return DoRpc<T>(serverId, route, msg, _internalRpcSerializer);
+        }
+
+        Task<T> DoRpc<T>(string serverId, Route route, object msg, ISerializer serializer)
         {
             return Task.Run(() =>
             {
@@ -29,16 +51,16 @@ namespace NPitaya
                 var context = new CallbackContext<T>
                 {
                     t = new TaskCompletionSource<T>(),
-                    serializer = _serializer,
+                    serializer = serializer,
                 };
                 var handle = GCHandle.Alloc(context, GCHandleType.Normal);
+                var payload = SerializerUtils.SerializeOrRaw(msg, serializer);
 
                 unsafe
                 {
-                    var data = SerializerUtils.SerializeOrRaw(msg, _serializer);
-                    fixed (byte* p = data)
+                    fixed (byte* p = payload)
                     {
-                        IntPtr request = PitayaCluster.pitaya_buffer_new((IntPtr)p, data.Length);
+                        IntPtr request = PitayaCluster.pitaya_buffer_new((IntPtr)p, payload.Length);
                         PitayaCluster.pitaya_send_rpc(
                             _pitaya,
                             serverId,

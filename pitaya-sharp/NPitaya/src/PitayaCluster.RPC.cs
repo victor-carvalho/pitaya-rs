@@ -13,7 +13,7 @@ namespace NPitaya
         static async Task<Response> HandleRpc(RpcClient rpcClient, Protos.Request req, RPCType type)
         {
             byte[] data = req.Msg.Data.ToByteArray();
-            Route route = Route.FromString(req.Msg.Route);
+            var route = Route.FromString(req.Msg.Route);
 
             string handlerName = $"{route.service}.{route.method}";
 
@@ -23,7 +23,7 @@ namespace NPitaya
             RemoteMethod handler;
             if (type == RPCType.Sys)
             {
-                s = new Models.PitayaSession(req.Session, rpcClient, req.FrontendID);
+                s = new PitayaSession(req.Session, rpcClient, req.FrontendID);
                 if (!HandlersDict.ContainsKey(handlerName))
                 {
                     response = GetErrorResponse("PIT-404",
@@ -48,7 +48,7 @@ namespace NPitaya
             Task ans;
             if (handler.ArgType != null)
             {
-                var arg = _serializer.Unmarshal(data, handler.ArgType);
+                var arg = Unmarshal(data, handler.ArgType, req.FrontendID);
                 if (type == RPCType.Sys)
                     ans = handler.Method.Invoke(handler.Obj, new[] {s, arg}) as Task;
                 else
@@ -67,9 +67,18 @@ namespace NPitaya
 
             if (handler.ReturnType != typeof(void))
             {
+                ISerializer serializer;
+                if (req.Type == RPCType.Sys)
+                {
+                    serializer = _serializer;
+                }
+                else
+                {
+                    serializer = _remoteSerializer;
+                }
                 ansBytes = SerializerUtils.SerializeOrRaw(ans.GetType().
                     GetProperty("Result")
-                    ?.GetValue(ans), _serializer);
+                    ?.GetValue(ans), serializer);
             }
             else
             {
@@ -77,6 +86,16 @@ namespace NPitaya
             }
             response.Data = ByteString.CopyFrom(ansBytes);
             return response;
+        }
+
+        static object Unmarshal(byte[] data, Type type, string frontendId)
+        {
+            if (string.IsNullOrEmpty(frontendId))
+            {
+                return _remoteSerializer.Unmarshal(data, type);
+            }
+
+            return _serializer.Unmarshal(data, type);
         }
 
         static void DispatchRpc(RpcClient rpcClient, IntPtr rpc, Protos.Request req)

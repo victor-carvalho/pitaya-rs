@@ -28,19 +28,19 @@ namespace PitayaCSharpExample
                 PitayaCluster.Terminate();
             };
 
-            var metricsParameters = new MetricsConfiguration(true, "127.0.0.1", "8000", "myns", null);
+            var metricsParameters = new MetricsConfiguration(false, "127.0.0.1", "8000", "myns", null);
 
             try
             {
                 PitayaCluster.Initialize(
-                    "CSHARP",
+                    "exampleapp",
                     "csharp.toml",
                     new Server(
-                        id: "c#-id",
-                        kind: "random-server-kind",
+                        id: Guid.NewGuid().ToString(),
+                        kind: "csharp",
                         metadata: "{}",
                         hostname: "ololo",
-                        frontend: true
+                        frontend: false
                     ),
                     NativeLogLevel.Debug,
                     NativeLogKind.Console,
@@ -79,7 +79,7 @@ namespace PitayaCSharpExample
             PitayaCluster.RegisterRemote(new TestRemote());
             PitayaCluster.RegisterHandler(new TestHandler());
 
-            // TrySendRpc();
+            TrySendRpc();
 
             PitayaCluster.WaitShutdownSignal();
         }
@@ -97,7 +97,6 @@ namespace PitayaCSharpExample
                         Msg = "HEY",
                     }
                 );
-                // var res = await PitayaCluster.Rpc<NPitaya.Protos.MyResponse>(Route.FromString("room.room.join"), null);
                 Console.WriteLine("GOT MESSAGE!!!");
                 Console.WriteLine($"Code: {res.Code}");
                 Console.WriteLine($"Msg: {res.Msg}");
