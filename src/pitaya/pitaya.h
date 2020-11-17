@@ -76,6 +76,8 @@ void pitaya_buffer_drop(PitayaBuffer *buf);
 
 PitayaBuffer *pitaya_buffer_new(const uint8_t *data, int32_t len);
 
+void pitaya_ctx_drop(PitayaContext *ctx);
+
 const char *pitaya_error_code(PitayaError *err);
 
 void pitaya_error_drop(PitayaError *error);

@@ -364,6 +364,11 @@ pub extern "C" fn pitaya_rpc_drop(rpc: *mut PitayaRpc) {
     let _ = unsafe { Box::from_raw(rpc) };
 }
 
+#[no_mangle]
+pub extern "C" fn pitaya_ctx_drop(ctx: *mut PitayaContext) {
+    let _ = unsafe { Box::from_raw(ctx) };
+}
+
 // We are telling rust here that we know it is safe to send the
 // PitayaUserData to another thread and use it in multiple threads.
 // In reality, this is a void* provided by the user, so it could definitely

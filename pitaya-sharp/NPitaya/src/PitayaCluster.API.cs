@@ -94,6 +94,10 @@ namespace NPitaya
             {
                 Logger.Error("Failed to decode request, error:{0}", e.Message);
             }
+            finally
+            {
+                pitaya_ctx_drop(ctx);
+            }
         }
 
         public static void Initialize(string envPrefix,

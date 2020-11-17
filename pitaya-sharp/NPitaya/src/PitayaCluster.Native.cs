@@ -134,6 +134,8 @@ namespace NPitaya
         private static extern IntPtr pitaya_rpc_respond(IntPtr rpc, IntPtr responseData, Int32 responseLen);
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         private static extern IntPtr pitaya_rpc_drop(IntPtr rpc);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr pitaya_ctx_drop(IntPtr ctx);
 
         //
         // Kick
