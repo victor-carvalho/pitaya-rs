@@ -28,7 +28,18 @@ namespace PitayaCSharpExample
                 PitayaCluster.Terminate();
             };
 
-            var metricsParameters = new MetricsConfiguration(false, "127.0.0.1", "8000", "myns", null);
+            var customMetrics = new CustomMetrics();
+            customMetrics.AddHistogram(
+                "my_histogram",
+                new HistogramBuckets(HistogramBucketKind.Linear, 1, 2, 10),
+                "Some test histogram",
+                new []{"my_label"});
+            var metricsParameters = new MetricsConfiguration(
+                true,
+                "127.0.0.1",
+                "8000",
+                "myns",
+                customMetrics);
 
             try
             {
@@ -100,6 +111,7 @@ namespace PitayaCSharpExample
                 Console.WriteLine("GOT MESSAGE!!!");
                 Console.WriteLine($"Code: {res.Code}");
                 Console.WriteLine($"Msg: {res.Msg}");
+                PitayaCluster.ObserveHistogram("my_histogram", 3, new []{"its_value"});
             }
             catch (PitayaException e)
             {

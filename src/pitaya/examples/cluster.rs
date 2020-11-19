@@ -153,7 +153,7 @@ async fn main() {
             name: "metric_name".into(),
             help: "super help".into(),
             variable_labels: vec![],
-            buckets: vec![],
+            buckets: None,
         })
         .unwrap();
 

@@ -307,7 +307,7 @@ namespace NPitaya
             _metricsReporter?.SetGauge(name, value, labels);
         }
 
-        public static void IncCounter(string name, float value, string[]? labels = null)
+        public static void ObserveHistogram(string name, float value, string[]? labels = null)
         {
             _metricsReporter?.ObserveHistogram(name, value, labels);
         }

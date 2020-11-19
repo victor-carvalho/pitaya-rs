@@ -50,14 +50,20 @@ typedef void (*PitayaHandleRpcCallback)(void*, PitayaContext*, PitayaRpc*);
 typedef void (*PitayaClusterNotificationCallback)(void*, PitayaClusterNotification, PitayaServerInfo*);
 
 typedef struct {
+    const char *kind;
+    double start;
+    double inc;
+    uint32_t count;
+} PitayaHistBucketOpts;
+
+typedef struct {
     const char *namespace_;
     const char *subsystem;
     const char *name;
     const char *help;
     const char **variable_labels;
     uint32_t variable_labels_count;
-    double *buckets;
-    uint32_t buckets_count;
+    PitayaHistBucketOpts buckets;
 } PitayaMetricsOpts;
 
 typedef void (*PitayaRegisterFn)(void *user_data, PitayaMetricsOpts opts);

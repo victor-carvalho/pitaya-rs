@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::{
     ffi::{c_void, CString},
-    os::raw::c_char,
+    os::raw::{c_char, c_double},
 };
 
 #[repr(C)]
@@ -12,8 +12,16 @@ pub struct PitayaMetricsOpts {
     pub help: *const c_char,
     pub variable_labels: *mut *const c_char,
     pub variable_labels_count: u32,
-    pub buckets: *mut f64,
-    pub buckets_count: u32,
+    pub buckets: PitayaHistBucketOpts,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct PitayaHistBucketOpts {
+    pub kind: *const c_char,
+    pub start: c_double,
+    pub inc: c_double,
+    pub count: u32,
 }
 
 type PitayaRegisterFn = extern "C" fn(user_data: *mut c_void, opts: PitayaMetricsOpts);
@@ -63,7 +71,7 @@ pub struct PitayaMetricsReporter {
 fn generic_register(
     register_fn: extern "C" fn(*mut c_void, PitayaMetricsOpts),
     user_data: *mut c_void,
-    mut opts: crate::metrics::Opts,
+    opts: crate::metrics::Opts,
 ) {
     // TODO(lhahn): this function allocates a lot of unnecessary memory.
     // consider improving this in the future.
@@ -85,6 +93,32 @@ fn generic_register(
         CString::new(opts.subsystem.as_str()).expect("string should be valid inside rust");
     let name = CString::new(opts.name.as_str()).expect("string should be valid inside rust");
     let help = CString::new(opts.help.as_str()).expect("string should be valid inside rust");
+    let (buckets, _) = opts
+        .buckets
+        .map(|b| {
+            let bucket_kind =
+                CString::new(b.kind.as_str()).expect("string should be valid inside rust");
+            (
+                PitayaHistBucketOpts {
+                    kind: bucket_kind.as_ptr(),
+                    start: b.start,
+                    inc: b.inc,
+                    count: b.count as u32,
+                },
+                bucket_kind,
+            )
+        })
+        .unwrap_or_else(|| {
+            (
+                PitayaHistBucketOpts {
+                    kind: std::ptr::null(),
+                    start: 0.0,
+                    inc: 0.0,
+                    count: 0,
+                },
+                Default::default(),
+            )
+        });
 
     let opts = PitayaMetricsOpts {
         namespace: namespace.as_ptr(),
@@ -93,8 +127,7 @@ fn generic_register(
         help: help.as_ptr(),
         variable_labels: variable_labels_ptr.as_mut_ptr(),
         variable_labels_count: variable_labels_ptr.len() as u32,
-        buckets: opts.buckets.as_mut_ptr(),
-        buckets_count: opts.buckets.len() as u32,
+        buckets,
     };
 
     register_fn(user_data, opts);

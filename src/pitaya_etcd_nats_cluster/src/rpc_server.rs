@@ -207,7 +207,7 @@ impl NatsRpcServer {
                 name: String::from(RPC_LATENCY_METRIC),
                 help: String::from("histogram of rpc latency in seconds"),
                 variable_labels: vec!["route".to_string(), "status".to_string()],
-                buckets: metrics::exponential_buckets(0.0005, 2.0, 20),
+                buckets: Some(metrics::exponential_buckets(0.0005, 2.0, 20)),
             })
             .expect("should not fail to register");
 
@@ -221,7 +221,7 @@ impl NatsRpcServer {
                 name: String::from(RPCS_IN_FLIGHT_METRIC),
                 help: String::from("number of in-flight RPCs at the moment"),
                 variable_labels: vec![],
-                buckets: vec![],
+                buckets: None,
             })
             .expect("should not failed to register");
     }

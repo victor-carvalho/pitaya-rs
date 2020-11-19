@@ -12,8 +12,16 @@ namespace NPitaya
         public IntPtr Help;
         public IntPtr VariableLabels;
         public UInt32 VariableLabelsCount;
-        public IntPtr Buckets;
-        public UInt32 BucketsCount;
+        public BucketOpts Buckets;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BucketOpts
+    {
+        public IntPtr Kind;
+        public double Start;
+        public double Increment;
+        public UInt32 Count;
     }
 
     public struct PitayaError

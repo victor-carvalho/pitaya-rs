@@ -46,7 +46,7 @@ impl NatsRpcClient {
                 name: String::from(CLIENT_LATENCY_METRIC),
                 help: String::from("histogram of client rpc latency in seconds"),
                 variable_labels: vec!["status".to_string()],
-                buckets: metrics::exponential_buckets(0.0005, 2.0, 20),
+                buckets: Some(metrics::exponential_buckets(0.0005, 2.0, 20)),
             })
             .expect("should not fail to register");
     }

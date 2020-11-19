@@ -4,7 +4,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Method, Request, Response, Server,
 };
-use pitaya_core::metrics::{Error, Opts, Reporter};
+use pitaya_core::metrics::{BucketOpts, Error, Opts, Reporter};
 use prometheus::{Encoder, TextEncoder};
 use slog::{error, info};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -123,7 +123,7 @@ impl Reporter for PrometheusReporter {
                 const_labels: self.const_labels.clone(),
                 variable_labels: vec![],
             },
-            buckets: opts.buckets,
+            buckets: to_prometheus_buckets(opts.buckets.unwrap()),
         };
         let label_names: Vec<&str> = opts.variable_labels.iter().map(|e| e.as_str()).collect();
         let collector = prometheus::HistogramVec::new(prometheus_opts, &label_names)
@@ -257,4 +257,23 @@ async fn metrics_handler(
             .status(hyper::StatusCode::NOT_FOUND)
             .body(Body::from("")),
     }
+}
+
+fn to_prometheus_buckets(opts: BucketOpts) -> Vec<f64> {
+    assert!(opts.count >= 1);
+    assert!(opts.start > 0.0);
+    assert!(opts.inc > 0.0);
+
+    let mut next = opts.start;
+    let mut buckets = Vec::with_capacity(opts.count);
+    for _ in 0..opts.count {
+        buckets.push(next);
+        if opts.kind == "linear" {
+            next += opts.inc;
+        } else {
+            next *= opts.inc;
+        }
+    }
+
+    buckets
 }
