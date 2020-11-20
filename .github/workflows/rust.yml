@@ -59,8 +59,8 @@ jobs:
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: libpitaya.dylib.tar
-          path: libpitaya.dylib.tar
+          name: libpitaya.dylib
+          path: target/release/libpitaya.dylib
 
   build-linux:
     name: build pitaya for linux
@@ -121,20 +121,20 @@ jobs:
         with:
           submodules: true
 
-      # Download Mac binary
+      # Download Linux binary
       - uses: actions/download-artifact@v2
         with:
           name: libpitaya.so.tar
 
-      # Download Libnux binary
+      # Download Mac binary
       - uses: actions/download-artifact@v2
         with:
-          name: libpitaya.dylib.tar
+          name: libpitaya.dylib
         
       # Open Mac and Linux archives
       - name: "open mac and linux archives"
         run: |
-          tar -xvf libpitaya.dylib.tar
+          chmod 744 libpitaya.dylib
           tar -xvf libpitaya.so.tar
 
       - name: "build c#"
