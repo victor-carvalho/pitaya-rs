@@ -12,6 +12,7 @@ test: start-test-deps
 clean:
 	@dotnet clean NPitaya
 	@rm -rf NPitaya/bin/Release
+	@rm -rf NPitaya/bin/Debug
 
 .PHONY: build
 build: clean
