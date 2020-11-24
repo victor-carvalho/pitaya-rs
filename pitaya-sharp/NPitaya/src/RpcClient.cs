@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using NPitaya.Serializer;
 using NPitaya.Protos;
 using System.Text;
+using System.Collections.Generic;
 using static NPitaya.Utils.Utils;
 
 namespace NPitaya
@@ -15,6 +16,11 @@ namespace NPitaya
         readonly IntPtr _pitaya;
         readonly ISerializer _serializer;
         readonly ProtobufSerializer _internalRpcSerializer;
+
+        private readonly Dictionary<Type, PitayaCluster.SendRpcCallback> callbackDict = new Dictionary<Type, PitayaCluster.SendRpcCallback>();
+        private readonly PitayaCluster.SendPushCallback pushCallback = new PitayaCluster.SendPushCallback(PushCallback);
+        private readonly PitayaCluster.SendKickCallback kickCallback = new PitayaCluster.SendKickCallback(KickCallback);
+
 
         public RpcClient(IntPtr pitaya, ISerializer serializer)
         {
@@ -47,7 +53,11 @@ namespace NPitaya
         {
             return Task.Run(() =>
             {
-                var callback = new PitayaCluster.SendRpcCallback(RpcCallback<T>);
+                if (!callbackDict.ContainsKey(typeof(T))){
+                    callbackDict.Add(typeof(T), new PitayaCluster.SendRpcCallback(RpcCallback<T>));
+                }
+                PitayaCluster.SendRpcCallback callback;
+                callbackDict.TryGetValue(typeof(T), out callback);
                 var context = new CallbackContext<T>
                 {
                     t = new TaskCompletionSource<T>(),
@@ -85,7 +95,6 @@ namespace NPitaya
                     serializer = _serializer,
                 };
                 var handle = GCHandle.Alloc(context, GCHandleType.Normal);
-                var del = new PitayaCluster.SendKickCallback(KickCallback);
 
                 unsafe
                 {
@@ -93,7 +102,7 @@ namespace NPitaya
                     fixed (byte* p = data)
                     {
                         IntPtr kickBuffer = PitayaCluster.pitaya_buffer_new((IntPtr)p, data.Length);
-                        PitayaCluster.pitaya_send_kick(_pitaya, frontendId, serverKind, kickBuffer, del, GCHandle.ToIntPtr(handle));
+                        PitayaCluster.pitaya_send_kick(_pitaya, frontendId, serverKind, kickBuffer, kickCallback, GCHandle.ToIntPtr(handle));
                     }
                 }
 
@@ -115,7 +124,6 @@ namespace NPitaya
                     t = new TaskCompletionSource<bool>(),
                     serializer = _serializer,
                 };
-                var del = new PitayaCluster.SendPushCallback(PushCallback);
                 var handle = GCHandle.Alloc(context, GCHandleType.Normal);
                 var push = new Push
                 {
@@ -130,7 +138,7 @@ namespace NPitaya
                     fixed (byte* p = data)
                     {
                         IntPtr pushBuffer = PitayaCluster.pitaya_buffer_new((IntPtr)p, data.Length);
-                        PitayaCluster.pitaya_send_push_to_user(_pitaya, frontendId, serverKind, pushBuffer, del, GCHandle.ToIntPtr(handle));
+                        PitayaCluster.pitaya_send_push_to_user(_pitaya, frontendId, serverKind, pushBuffer, pushCallback, GCHandle.ToIntPtr(handle));
                     }
                 }
 
