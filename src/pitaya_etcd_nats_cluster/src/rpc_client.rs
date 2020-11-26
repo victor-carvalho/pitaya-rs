@@ -4,16 +4,17 @@ use pitaya_core::{
     cluster::{Error, RpcClient, ServerId, ServerInfo, ServerKind},
     context, message, metrics, protos, utils,
 };
+use nats::{self, asynk};
 use prost::Message;
-use slog::{error, info, trace};
-use std::{sync::Arc, time::Instant};
-use tokio::sync::RwLock;
+use slog::{info, trace};
+use std::{sync::Arc, time::Instant, io};
+use tokio::{sync::RwLock, time::timeout};
 
 const CLIENT_LATENCY_METRIC: &str = "rpc_client_latency";
 
 pub struct NatsRpcClient {
-    settings: Arc<settings::Nats>,
-    connection: Arc<RwLock<Option<nats::Connection>>>,
+    settings: settings::Nats,
+    connection: Arc<RwLock<Option<asynk::Connection>>>,
     logger: slog::Logger,
     server_info: Arc<ServerInfo>,
     reporter: metrics::ThreadSafeReporter,
@@ -22,7 +23,7 @@ pub struct NatsRpcClient {
 impl NatsRpcClient {
     pub fn new(
         logger: slog::Logger,
-        settings: Arc<settings::Nats>,
+        settings: settings::Nats,
         server_info: Arc<ServerInfo>,
         reporter: metrics::ThreadSafeReporter,
     ) -> Self {
@@ -64,7 +65,8 @@ impl RpcClient for NatsRpcClient {
         info!(self.logger, "client connecting to nats"; "url" => &self.settings.url);
         let nc = nats::Options::with_user_pass(&self.settings.auth_user, &self.settings.auth_pass)
             .max_reconnects(Some(self.settings.max_reconnection_attempts as usize))
-            .connect(&self.settings.url)
+            .connect_async(&self.settings.url)
+            .await
             .map_err(Error::Nats)?;
 
         self.connection.write().await.replace(nc);
@@ -74,6 +76,7 @@ impl RpcClient for NatsRpcClient {
 
     async fn shutdown(&self) -> Result<(), Error> {
         if let Some(conn) = self.connection.write().await.take() {
+            // TODO(victor.carvalho) we have to await for connection to close
             conn.close();
         }
         Ok(())
@@ -109,30 +112,20 @@ impl RpcClient for NatsRpcClient {
         let request_timeout = self.settings.request_timeout;
 
         // We do a spawn_blocking here, since it otherwise will block the executor thread.
-        let res = tokio::task::spawn_blocking(move || -> Result<protos::Response, Error> {
-            let message = connection
-                .request_timeout(&topic, buffer, request_timeout)
+        let res: Result<protos::Response, Error> = {
+            let message =
+                timeout(request_timeout, connection.request(&topic, buffer))
+                .await
+                .map_err(|_| Error::Nats(io::ErrorKind::TimedOut.into()))?
                 .map_err(Error::Nats)?;
+
             let msg: protos::Response =
                 Message::decode(message.data.as_ref()).map_err(Error::InvalidServerResponse)?;
             Ok(msg)
-        })
-        .await;
+        };
 
         match res {
-            Err(join_error) => {
-                error!(self.logger, "failed to join rpc task"; "error" => %join_error);
-                metrics::record_histogram_duration(
-                    self.logger.clone(),
-                    self.reporter.clone(),
-                    CLIENT_LATENCY_METRIC,
-                    rpc_start,
-                    &["failed"],
-                )
-                .await;
-                Err(Error::Internal("failed to join rpc task".to_owned()))
-            }
-            Ok(Err(err)) => {
+            Err(err) => {
                 metrics::record_histogram_duration(
                     self.logger.clone(),
                     self.reporter.clone(),
@@ -143,7 +136,7 @@ impl RpcClient for NatsRpcClient {
                 .await;
                 Err(err)
             }
-            Ok(Ok(r)) => {
+            Ok(r) => {
                 metrics::record_histogram_duration(
                     self.logger.clone(),
                     self.reporter.clone(),
@@ -182,28 +175,19 @@ impl RpcClient for NatsRpcClient {
         }
 
         let request_timeout = self.settings.request_timeout;
-        let res = tokio::task::spawn_blocking(move || -> Result<protos::KickAnswer, Error> {
-            let topic = utils::user_kick_topic(&kick_msg.user_id, &server_kind);
-            let kick_buffer = utils::encode_proto(&kick_msg);
 
-            let message = connection
-                .request_timeout(&topic, kick_buffer, request_timeout)
-                .map_err(Error::Nats)?;
+        let topic = utils::user_kick_topic(&kick_msg.user_id, &server_kind);
+        let kick_buffer = utils::encode_proto(&kick_msg);
 
-            let k: protos::KickAnswer =
-                Message::decode(&message.data[..]).map_err(Error::InvalidServerResponse)?;
-            Ok(k)
-        })
-        .await;
+        let message =
+            timeout(request_timeout, connection.request(&topic, kick_buffer))
+            .await
+            .map_err(|_| Error::Nats(io::ErrorKind::TimedOut.into()))?
+            .map_err(Error::Nats)?;
 
-        match res {
-            Err(join_error) => {
-                error!(self.logger, "failed to join kick task"; "error" => %join_error);
-                Err(Error::Internal("failed to join kick task".to_owned()))
-            }
-            Ok(Err(err)) => Err(err),
-            Ok(Ok(r)) => Ok(r),
-        }
+        let k: protos::KickAnswer =
+            Message::decode(&message.data[..]).map_err(Error::InvalidServerResponse)?;
+        Ok(k)
     }
 
     async fn push_to_user(
@@ -227,26 +211,16 @@ impl RpcClient for NatsRpcClient {
             return Err(Error::EmptyServerKind);
         }
 
-        let res = tokio::task::spawn_blocking(move || -> Result<(), Error> {
-            let topic = utils::user_messages_topic(&push_msg.uid, &server_kind);
-            let push_buffer = utils::encode_proto(&push_msg);
 
-            connection
-                .publish(&topic, push_buffer)
-                .map_err(Error::Nats)?;
+        let topic = utils::user_messages_topic(&push_msg.uid, &server_kind);
+        let push_buffer = utils::encode_proto(&push_msg);
 
-            Ok(())
-        })
-        .await;
+        connection
+            .publish(&topic, push_buffer)
+            .await
+            .map_err(Error::Nats)?;
 
-        match res {
-            Err(join_error) => {
-                error!(self.logger, "failed to join push task"; "error" => %join_error);
-                Err(Error::Internal("failed to join push task".to_owned()))
-            }
-            Ok(Err(err)) => Err(err),
-            Ok(Ok(_)) => Ok(()),
-        }
+        Ok(())
     }
 }
 
@@ -273,10 +247,10 @@ mod tests {
     fn nats_rpc_client_can_be_created() {
         let _client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
-            Arc::new(settings::Nats {
+            settings::Nats {
                 url: "https://sfdjsdoifj".to_owned(),
                 ..Default::default()
-            }),
+            },
             new_server(),
             Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
@@ -287,10 +261,10 @@ mod tests {
     async fn nats_fails_connection() {
         let client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
-            Arc::new(settings::Nats {
+            settings::Nats {
                 url: "https://nats-io.server:3241".to_owned(),
                 ..Default::default()
-            }),
+            },
             new_server(),
             Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
@@ -302,10 +276,10 @@ mod tests {
     async fn nats_request_timeout() -> Result<(), Error> {
         let client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
-            Arc::new(settings::Nats {
+            settings::Nats {
                 request_timeout: Duration::from_millis(300),
                 ..Default::default()
-            }),
+            },
             new_server(),
             Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
@@ -376,10 +350,10 @@ mod tests {
 
         let client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
-            Arc::new(settings::Nats {
+            settings::Nats {
                 request_timeout: Duration::from_millis(300),
                 ..Default::default()
-            }),
+            },
             sv,
             Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );

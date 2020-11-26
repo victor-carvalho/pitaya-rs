@@ -5,15 +5,32 @@ use pitaya_core::{
     metrics::{self},
     protos, utils,
 };
+use nats::{self, asynk};
 use slog::{debug, error, info, o, trace, warn};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, RwLock};
+use futures::{future, StreamExt};
 
 const RPCS_IN_FLIGHT_METRIC: &str = "rpcs_in_flight";
 
+struct RpcServerState {
+    connection: asynk::Connection,
+    close_sender: oneshot::Sender<()>,
+}
+
+impl RpcServerState {
+    async fn close(self) {
+        // TODO(victor-carvalho) we have to wait on connection close
+        self.connection.close();
+        let _ = self.close_sender.send(());
+    }
+}
+
+type NatsRpcServerState = Arc<RwLock<Option<RpcServerState>>>;
+
 pub struct NatsRpcServer {
-    settings: Arc<settings::Nats>,
-    connection: Arc<RwLock<Option<(nats::Connection, nats::subscription::Handler)>>>,
+    settings: settings::Nats,
+    connection: NatsRpcServerState,
     this_server: Arc<ServerInfo>,
     runtime_handle: tokio::runtime::Handle,
     logger: slog::Logger,
@@ -24,7 +41,7 @@ impl NatsRpcServer {
     pub fn new(
         logger: slog::Logger,
         this_server: Arc<ServerInfo>,
-        settings: Arc<settings::Nats>,
+        settings: settings::Nats,
         runtime_handle: tokio::runtime::Handle,
         reporter: metrics::ThreadSafeReporter,
     ) -> Self {
@@ -39,13 +56,14 @@ impl NatsRpcServer {
     }
 
     fn on_nats_message(
-        mut message: nats::Message,
+        mut message: asynk::Message,
         logger: &slog::Logger,
         sender: &mpsc::Sender<Rpc>,
         runtime_handle: tokio::runtime::Handle,
-        conn: Arc<RwLock<Option<(nats::Connection, nats::subscription::Handler)>>>,
+        state: NatsRpcServerState,
+        reporter: &metrics::ThreadSafeReporter,
     ) -> std::io::Result<()> {
-        debug!(logger, "received nats message"; "message" => %message);
+        // debug!(logger, "received nats message"; "message" => %message);
 
         let mut sender = sender.clone();
 
@@ -72,8 +90,8 @@ impl NatsRpcServer {
                     runtime_handle.spawn(async move {
                         match response_receiver.await {
                             Ok(response) => {
-                                let conn = match conn.read().await.as_ref() {
-                                    Some((conn, _)) => conn.clone(),
+                                let conn = match state.read().await.as_ref() {
+                                    Some(state) => state.connection.clone(),
                                     _ => {
                                         error!(logger, "connection not open, cannot answer");
                                         return;
@@ -81,7 +99,7 @@ impl NatsRpcServer {
                                 };
 
                                 debug!(logger, "responding rpc");
-                                if let Err(err) = Self::respond(&conn, &response_topic, response)
+                                if let Err(err) = Self::respond(&conn, &response_topic, response).await
                                 {
                                     error!(logger, "failed to respond rpc"; "error" => %err);
                                 }
@@ -99,8 +117,8 @@ impl NatsRpcServer {
                     let logger = logger.clone();
                     runtime_handle.spawn(async move {
                         warn!(logger, "channel is full, dropping request");
-                        let conn = match conn.read().await.as_ref() {
-                            Some((conn, _)) => conn.clone(),
+                        let conn = match state.read().await.as_ref() {
+                            Some(state) => state.connection.clone(),
                             _ => {
                                 error!(logger, "connection not open, cannot answer");
                                 return;
@@ -115,7 +133,7 @@ impl NatsRpcServer {
                             }),
                             ..Default::default()
                         });
-                        if let Err(err) = Self::respond(&conn, &response_topic, response) {
+                        if let Err(err) = Self::respond(&conn, &response_topic, response).await {
                             error!(logger, "failed to respond rpc"; "error" => %err);
                         }
                     })
@@ -129,12 +147,16 @@ impl NatsRpcServer {
         Ok(())
     }
 
-    fn respond(
-        connection: &nats::Connection,
+    async fn respond(
+        connection: &asynk::Connection,
         reply_topic: &str,
         res: Vec<u8>,
     ) -> Result<(), Error> {
-        connection.publish(reply_topic, res).map_err(Error::Nats)
+        let buffer = utils::encode_proto(&res);
+        connection
+            .publish(reply_topic, buffer)
+            .await
+            .map_err(Error::Nats)
     }
 
     async fn register_metrics(&self) {
@@ -171,47 +193,64 @@ impl RpcServer for NatsRpcServer {
         let nats_connection =
             nats::Options::with_user_pass(&self.settings.auth_user, &self.settings.auth_pass)
                 .max_reconnects(Some(self.settings.max_reconnection_attempts as usize))
-                .connect(&self.settings.url)
+                .connect_async(&self.settings.url)
+                .await
                 .map_err(Error::Nats)?;
 
         let (rpc_sender, rpc_receiver) = mpsc::channel(self.settings.max_rpcs_queued as usize);
+        let (close_sender, close_receiver) = oneshot::channel();
 
-        let sub = {
-            let topic = utils::topic_for_server(&self.this_server);
-            let logger = self.logger.new(o!());
+        let topic = utils::topic_for_server(&self.this_server);
+        let logger = self.logger.new(o!());
 
-            info!(self.logger, "rpc server subscribing"; "topic" => &topic);
+        info!(self.logger, "rpc server subscribing"; "topic" => &topic);
 
-            let sender = rpc_sender;
-            let runtime_handle = self.runtime_handle.clone();
-            let connection = self.connection.clone();
-            nats_connection
-                .subscribe(&topic)
-                .map_err(Error::Nats)?
-                .with_handler(move |message| {
-                    Self::on_nats_message(
-                        message,
-                        &logger,
-                        &sender,
-                        runtime_handle.clone(),
-                        connection.clone(),
-                    )
-                })
-        };
+        let sender = rpc_sender;
+        let runtime_handle = self.runtime_handle.clone();
+        let connection = self.connection.clone();
+        let reporter = self.reporter.clone();
+
+        let subscription = nats_connection
+            .subscribe(&topic)
+            .await
+            .map_err(Error::Nats)?;
+
+
+        self.runtime_handle.spawn(future::select(
+                subscription.for_each(move |message| {
+                    future::ready({
+                        if let Err(e) = Self::on_nats_message(
+                            message,
+                            &logger,
+                            &sender,
+                            runtime_handle.clone(),
+                            connection.clone(),
+                            &reporter,
+                        ) {
+                            error!(logger, "error consuming message"; "error" => %e);
+                        }
+                    })
+                }),
+                close_receiver,
+        ));
 
         self.connection
             .write()
             .await
-            .replace((nats_connection, sub));
+            .replace(RpcServerState {
+                close_sender,
+                connection: nats_connection,
+            });
+
         Ok(rpc_receiver)
     }
 
     // Shuts down the server.
     async fn shutdown(&self) -> Result<(), Error> {
-        if let Some((connection, sub_handler)) = self.connection.write().await.take() {
-            sub_handler.unsubscribe().map_err(Error::Nats)?;
-            connection.close();
+        if let Some(state) = self.connection.write().await.take() {
+            state.close().await;
         }
+
         Ok(())
     }
 }
@@ -240,10 +279,11 @@ mod tests {
         let rpc_server = NatsRpcServer::new(
             test_helpers::get_root_logger(),
             sv.clone(),
-            Arc::new(Default::default()),
+            Default::default(),
             tokio::runtime::Handle::current(),
             Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
+
         let mut rpc_server_conn = rpc_server.start().await?;
 
         let handle = {
@@ -263,7 +303,7 @@ mod tests {
         {
             let client = NatsRpcClient::new(
                 test_helpers::get_root_logger(),
-                Arc::new(Default::default()),
+                Default::default(),
                 sv.clone(),
                 Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
             );
@@ -285,10 +325,34 @@ mod tests {
                 )
                 .await?;
 
+
             assert_eq!(
                 String::from_utf8_lossy(&res.data),
                 "HEY, THIS IS THE SERVER"
             );
+
+            let res = client
+                .call(
+                    context::Context::empty(),
+                    protos::RpcType::User,
+                    message::Message {
+                        kind: message::Kind::Request,
+                        id: 12,
+                        data: b"sending some data".to_vec(),
+                        route: "room.room.join".to_owned(),
+                        compressed: false,
+                        err: false,
+                    },
+                    sv.clone(),
+                )
+                .await?;
+
+
+            assert_eq!(
+                String::from_utf8_lossy(&res.data),
+                "HEY, THIS IS THE SERVER"
+            );
+
             client.shutdown().await?;
         }
 
