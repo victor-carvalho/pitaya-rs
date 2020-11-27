@@ -1,15 +1,15 @@
 use crate::settings;
 use async_trait::async_trait;
+use futures::{future, StreamExt};
+use nats::{self, asynk};
 use pitaya_core::{
     cluster::{Error, Rpc, RpcServer, ServerInfo},
     metrics::{self},
     protos, utils,
 };
-use nats::{self, asynk};
 use slog::{debug, error, info, o, trace, warn};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, RwLock};
-use futures::{future, StreamExt};
 
 const RPCS_IN_FLIGHT_METRIC: &str = "rpcs_in_flight";
 
@@ -63,7 +63,7 @@ impl NatsRpcServer {
         state: NatsRpcServerState,
         reporter: &metrics::ThreadSafeReporter,
     ) -> std::io::Result<()> {
-        // debug!(logger, "received nats message"; "message" => %message);
+        debug!(logger, "received nats message"; "message" => ?message);
 
         let mut sender = sender.clone();
 
@@ -215,32 +215,28 @@ impl RpcServer for NatsRpcServer {
             .await
             .map_err(Error::Nats)?;
 
-
         self.runtime_handle.spawn(future::select(
-                subscription.for_each(move |message| {
-                    future::ready({
-                        if let Err(e) = Self::on_nats_message(
-                            message,
-                            &logger,
-                            &sender,
-                            runtime_handle.clone(),
-                            connection.clone(),
-                            &reporter,
-                        ) {
-                            error!(logger, "error consuming message"; "error" => %e);
-                        }
-                    })
-                }),
-                close_receiver,
+            subscription.for_each(move |message| {
+                future::ready({
+                    if let Err(e) = Self::on_nats_message(
+                        message,
+                        &logger,
+                        &sender,
+                        runtime_handle.clone(),
+                        connection.clone(),
+                        &reporter,
+                    ) {
+                        error!(logger, "error consuming message"; "error" => %e);
+                    }
+                })
+            }),
+            close_receiver,
         ));
 
-        self.connection
-            .write()
-            .await
-            .replace(RpcServerState {
-                close_sender,
-                connection: nats_connection,
-            });
+        self.connection.write().await.replace(RpcServerState {
+            close_sender,
+            connection: nats_connection,
+        });
 
         Ok(rpc_receiver)
     }
@@ -325,7 +321,6 @@ mod tests {
                 )
                 .await?;
 
-
             assert_eq!(
                 String::from_utf8_lossy(&res.data),
                 "HEY, THIS IS THE SERVER"
@@ -346,7 +341,6 @@ mod tests {
                     sv.clone(),
                 )
                 .await?;
-
 
             assert_eq!(
                 String::from_utf8_lossy(&res.data),

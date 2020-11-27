@@ -1,13 +1,13 @@
 use crate::settings;
 use async_trait::async_trait;
+use nats::{self, asynk};
 use pitaya_core::{
     cluster::{Error, RpcClient, ServerId, ServerInfo, ServerKind},
     context, message, metrics, protos, utils,
 };
-use nats::{self, asynk};
 use prost::Message;
 use slog::{info, trace};
-use std::{sync::Arc, time::Instant, io};
+use std::{io, sync::Arc, time::Instant};
 use tokio::{sync::RwLock, time::timeout};
 
 const CLIENT_LATENCY_METRIC: &str = "rpc_client_latency";
@@ -113,8 +113,7 @@ impl RpcClient for NatsRpcClient {
 
         // We do a spawn_blocking here, since it otherwise will block the executor thread.
         let res: Result<protos::Response, Error> = {
-            let message =
-                timeout(request_timeout, connection.request(&topic, buffer))
+            let message = timeout(request_timeout, connection.request(&topic, buffer))
                 .await
                 .map_err(|_| Error::Nats(io::ErrorKind::TimedOut.into()))?
                 .map_err(Error::Nats)?;
@@ -179,8 +178,7 @@ impl RpcClient for NatsRpcClient {
         let topic = utils::user_kick_topic(&kick_msg.user_id, &server_kind);
         let kick_buffer = utils::encode_proto(&kick_msg);
 
-        let message =
-            timeout(request_timeout, connection.request(&topic, kick_buffer))
+        let message = timeout(request_timeout, connection.request(&topic, kick_buffer))
             .await
             .map_err(|_| Error::Nats(io::ErrorKind::TimedOut.into()))?
             .map_err(Error::Nats)?;
@@ -210,7 +208,6 @@ impl RpcClient for NatsRpcClient {
         if server_kind.0.is_empty() {
             return Err(Error::EmptyServerKind);
         }
-
 
         let topic = utils::user_messages_topic(&push_msg.uid, &server_kind);
         let push_buffer = utils::encode_proto(&push_msg);
