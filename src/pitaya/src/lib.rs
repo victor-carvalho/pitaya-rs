@@ -632,6 +632,7 @@ impl<'a> PitayaBuilder<'a> {
             logger.clone(),
             settings.nats.clone(),
             server_info.clone(),
+            tokio::runtime::Handle::current(),
             metrics_reporter.clone(),
         ));
 

@@ -18,6 +18,7 @@ pub struct NatsRpcClient {
     logger: slog::Logger,
     server_info: Arc<ServerInfo>,
     reporter: metrics::ThreadSafeReporter,
+    runtime_handle: tokio::runtime::Handle,
 }
 
 impl NatsRpcClient {
@@ -25,6 +26,7 @@ impl NatsRpcClient {
         logger: slog::Logger,
         settings: settings::Nats,
         server_info: Arc<ServerInfo>,
+        runtime_handle: tokio::runtime::Handle,
         reporter: metrics::ThreadSafeReporter,
     ) -> Self {
         Self {
@@ -33,6 +35,7 @@ impl NatsRpcClient {
             logger,
             server_info,
             reporter,
+            runtime_handle,
         }
     }
 
@@ -76,8 +79,12 @@ impl RpcClient for NatsRpcClient {
 
     async fn shutdown(&self) -> Result<(), Error> {
         if let Some(conn) = self.connection.write().await.take() {
-            // TODO(victor.carvalho) we have to await for connection to close
-            conn.close();
+            let handle = self.runtime_handle.clone();
+            // need to spawn a thread so it does not block the current runtime thread
+            let th = std::thread::spawn(move || handle.block_on(conn.close()).map_err(Error::Nats));
+            return th
+                .join()
+                .unwrap_or_else(|_| Err(Error::Internal("error joining thread".into())));
         }
         Ok(())
     }
@@ -240,8 +247,8 @@ mod tests {
         })
     }
 
-    #[test]
-    fn nats_rpc_client_can_be_created() {
+    #[tokio::test]
+    async fn nats_rpc_client_can_be_created() {
         let _client = NatsRpcClient::new(
             test_helpers::get_root_logger(),
             settings::Nats {
@@ -249,6 +256,7 @@ mod tests {
                 ..Default::default()
             },
             new_server(),
+            tokio::runtime::Handle::current(),
             Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
     }
@@ -263,6 +271,7 @@ mod tests {
                 ..Default::default()
             },
             new_server(),
+            tokio::runtime::Handle::current(),
             Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
         client.start().await.unwrap();
@@ -278,6 +287,7 @@ mod tests {
                 ..Default::default()
             },
             new_server(),
+            tokio::runtime::Handle::current(),
             Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
         client.start().await?;
@@ -352,6 +362,7 @@ mod tests {
                 ..Default::default()
             },
             sv,
+            tokio::runtime::Handle::current(),
             Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
         );
         client.start().await?;

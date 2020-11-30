@@ -19,10 +19,10 @@ struct RpcServerState {
 }
 
 impl RpcServerState {
-    async fn close(self) {
+    async fn close(self) -> Result<(), Error> {
         // TODO(victor-carvalho) we have to wait on connection close
-        self.connection.close();
         let _ = self.close_sender.send(());
+        self.connection.close().await.map_err(Error::Nats)
     }
 }
 
@@ -217,18 +217,17 @@ impl RpcServer for NatsRpcServer {
 
         self.runtime_handle.spawn(future::select(
             subscription.for_each(move |message| {
-                future::ready({
-                    if let Err(e) = Self::on_nats_message(
-                        message,
-                        &logger,
-                        &sender,
-                        runtime_handle.clone(),
-                        connection.clone(),
-                        &reporter,
-                    ) {
-                        error!(logger, "error consuming message"; "error" => %e);
-                    }
-                })
+                if let Err(e) = Self::on_nats_message(
+                    message,
+                    &logger,
+                    &sender,
+                    runtime_handle.clone(),
+                    connection.clone(),
+                    &reporter,
+                ) {
+                    error!(logger, "error consuming message"; "error" => %e);
+                }
+                future::ready(())
             }),
             close_receiver,
         ));
@@ -244,9 +243,13 @@ impl RpcServer for NatsRpcServer {
     // Shuts down the server.
     async fn shutdown(&self) -> Result<(), Error> {
         if let Some(state) = self.connection.write().await.take() {
-            state.close().await;
+            let handle = self.runtime_handle.clone();
+            // need to spawn a thread so it does not block the current runtime thread
+            let th = std::thread::spawn(move || handle.block_on(state.close()));
+            return th
+                .join()
+                .unwrap_or_else(|_| Err(Error::Internal("error joining thread".into())));
         }
-
         Ok(())
     }
 }
@@ -301,6 +304,7 @@ mod tests {
                 test_helpers::get_root_logger(),
                 Default::default(),
                 sv.clone(),
+                tokio::runtime::Handle::current(),
                 Arc::new(RwLock::new(Box::new(metrics::DummyReporter {}))),
             );
             client.start().await?;
