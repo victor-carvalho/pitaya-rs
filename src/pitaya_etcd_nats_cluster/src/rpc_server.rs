@@ -150,9 +150,8 @@ impl NatsRpcServer {
         reply_topic: &str,
         res: Vec<u8>,
     ) -> Result<(), Error> {
-        let buffer = utils::encode_proto(&res);
         connection
-            .publish(reply_topic, buffer)
+            .publish(reply_topic, res)
             .await
             .map_err(Error::Nats)
     }
