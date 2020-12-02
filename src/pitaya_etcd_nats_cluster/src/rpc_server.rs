@@ -20,7 +20,6 @@ struct RpcServerState {
 
 impl RpcServerState {
     async fn close(self) -> Result<(), Error> {
-        // TODO(victor-carvalho) we have to wait on connection close
         let _ = self.close_sender.send(());
         self.connection.close().await.map_err(Error::Nats)
     }
@@ -61,7 +60,6 @@ impl NatsRpcServer {
         sender: &mpsc::Sender<Rpc>,
         runtime_handle: tokio::runtime::Handle,
         state: NatsRpcServerState,
-        reporter: &metrics::ThreadSafeReporter,
     ) -> std::io::Result<()> {
         debug!(logger, "received nats message"; "message" => ?message);
 
@@ -208,7 +206,6 @@ impl RpcServer for NatsRpcServer {
         let sender = rpc_sender;
         let runtime_handle = self.runtime_handle.clone();
         let connection = self.connection.clone();
-        let reporter = self.reporter.clone();
 
         let subscription = nats_connection
             .subscribe(&topic)
@@ -223,7 +220,6 @@ impl RpcServer for NatsRpcServer {
                     &sender,
                     runtime_handle.clone(),
                     connection.clone(),
-                    &reporter,
                 ) {
                     error!(logger, "error consuming message"; "error" => %e);
                 }

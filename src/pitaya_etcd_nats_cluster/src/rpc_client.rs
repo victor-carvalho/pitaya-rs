@@ -118,7 +118,6 @@ impl RpcClient for NatsRpcClient {
 
         let request_timeout = self.settings.request_timeout;
 
-        // We do a spawn_blocking here, since it otherwise will block the executor thread.
         let res: Result<protos::Response, Error> = {
             let message = timeout(request_timeout, connection.request(&topic, buffer))
                 .await
