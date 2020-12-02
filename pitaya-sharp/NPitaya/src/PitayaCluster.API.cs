@@ -18,7 +18,8 @@ namespace NPitaya
     // Allows making RPC calls to other Pitaya servers.
     public partial class PitayaCluster
     {
-        private static ISerializer _serializer = new JSONSerializer();
+        const string RPC_LATENCY_METRIC = "rpc_latency";
+        static ISerializer _serializer = new JSONSerializer();
         static ProtobufSerializer _remoteSerializer = new ProtobufSerializer();
         public delegate string RemoteNameFunc(string methodName);
         delegate void OnSignalFunc();
@@ -48,7 +49,7 @@ namespace NPitaya
             }
         }
 
-        static ServiceDiscoveryListener _serviceDiscoveryListener;
+        static ServiceDiscoveryListener? _serviceDiscoveryListener;
 
         public static void AddSignalHandler(Action cb)
         {
@@ -77,7 +78,7 @@ namespace NPitaya
             );
         }
 
-        static void HandleRpcCallback(IntPtr userData, IntPtr ctx, IntPtr rpc)
+        static void HandleRpcCallback(IntPtr userData, IntPtr rpc)
         {
             Int32 len;
             IntPtr rawData = pitaya_rpc_request(rpc, out len);
@@ -93,10 +94,6 @@ namespace NPitaya
             catch (Exception e)
             {
                 Logger.Error("Failed to decode request, error:{0}", e.Message);
-            }
-            finally
-            {
-                pitaya_ctx_drop(ctx);
             }
         }
 
@@ -117,6 +114,13 @@ namespace NPitaya
             var pitayaMetrics = IntPtr.Zero;
             if (metricsConfig.IsEnabled)
             {
+                if (metricsConfig.CustomMetrics == null) {
+                    metricsConfig.CustomMetrics = new CustomMetrics();
+                }
+                metricsConfig.CustomMetrics.AddHistogram(
+                    RPC_LATENCY_METRIC,
+                    new HistogramBuckets(HistogramBucketKind.Exponential, 0.0005, 2.0, 20)
+                );
                 _metricsReporter = new MetricsReporter(metricsConfig);
                 pitayaMetrics = _metricsReporter.GetPitayaPtr();
             }
